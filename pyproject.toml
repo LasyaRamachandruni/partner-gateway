@@ -24,7 +24,8 @@ dependencies = [
 
 [project.optional-dependencies]
 gcp = ["google-cloud-pubsub>=2.21"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "grpcio-tools>=1.66", "google-cloud-pubsub>=2.21"]
+otlp = ["opentelemetry-exporter-otlp-proto-http>=1.25"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "grpcio-tools>=1.66", "google-cloud-pubsub>=2.21", "matplotlib>=3.7", "pyyaml>=6"]
 
 [project.scripts]
 pgw = "pgw.cli:main"

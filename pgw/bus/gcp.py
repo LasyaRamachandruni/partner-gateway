@@ -22,18 +22,19 @@ from .base import Handler, Message
 
 
 class GcpPubSubBus:
-    def __init__(self, project: str, create: bool = False, ack_timeout_s: float = 30.0):
+    def __init__(self, project: str, create: bool = False, ack_timeout_s: float = 30.0, suffix: str = ""):
         from google.cloud import pubsub_v1  # pip install ".[gcp]"
 
         self.project = project
         self.create = create
         self.ack_timeout_s = ack_timeout_s
+        self.suffix = suffix  # Terraform names resources per environment: vehicle-command-results-dev
         self.publisher = pubsub_v1.PublisherClient()
         self.subscriber = pubsub_v1.SubscriberClient()
         self._futures = []
 
     def _topic(self, topic: str) -> str:
-        return self.publisher.topic_path(self.project, topic)
+        return self.publisher.topic_path(self.project, topic + self.suffix)
 
     def _ensure_topic(self, topic: str) -> str:
         path = self._topic(topic)
@@ -53,7 +54,7 @@ class GcpPubSubBus:
 
     async def subscribe(self, topic: str, subscription: str, handler: Handler) -> None:
         topic_path = await asyncio.to_thread(self._ensure_topic, topic)
-        sub_path = self.subscriber.subscription_path(self.project, subscription)
+        sub_path = self.subscriber.subscription_path(self.project, subscription + self.suffix)
         if self.create:
             from google.api_core.exceptions import AlreadyExists
 

@@ -23,7 +23,8 @@ def _bus(name: str):
         from .bus.gcp import GcpPubSubBus
 
         return GcpPubSubBus(os.environ.get("PUBSUB_PROJECT", "pgw-local"),
-                            create=bool(os.environ.get("PUBSUB_EMULATOR_HOST")))
+                            create=bool(os.environ.get("PUBSUB_EMULATOR_HOST")),
+                            suffix=os.environ.get("PUBSUB_SUFFIX", ""))  # e.g. "-dev" to match Terraform
     from .bus.memory import InMemoryBus
 
     return InMemoryBus()
@@ -50,6 +51,10 @@ def cmd_vehicle_service(args) -> int:
     from . import certs
     from .vehicles.fleet import Fleet
     from .vehicles.service import serve
+
+    from .obs import tracing
+
+    tracing.setup_from_env("vehicle-service")
 
     async def main():
         bundle = certs.load(args.certs)
@@ -80,6 +85,9 @@ def cmd_gateway(args) -> int:
     from .gateway.upstream import VehicleClient
     from .gateway.webhooks import WebhookDispatcher
 
+    from .obs import tracing
+
+    tracing.setup_from_env("partner-gateway")
     bundle = certs.load(args.certs)
     registry = PartnerRegistry()
     if args.demo_partner:

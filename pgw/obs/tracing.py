@@ -34,6 +34,19 @@ def setup(service: str = "partner-gateway", exporter: SpanExporter | None = None
     return _provider
 
 
+def setup_from_env(service: str) -> TracerProvider:
+    """Export spans over OTLP/HTTP when OTEL_EXPORTER_OTLP_ENDPOINT is set (e.g. to Jaeger in docker-compose)."""
+    import os
+
+    provider = setup(service)
+    if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter  # pip install ".[otlp]"
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+    return provider
+
+
 def tracer(name: str):
     return trace.get_tracer(name)
 
