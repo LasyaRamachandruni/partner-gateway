@@ -1,0 +1,57 @@
+# The services as separate processes, with the Pub/Sub emulator as the message bus.
+#
+#   docker compose up --build
+#   docker compose logs gateway | grep client_id        # demo partner credentials
+#
+#   Gateway API  http://localhost:8080        Prometheus  http://localhost:9090 (SLO alert rules loaded)
+#   Jaeger UI    http://localhost:16686       (one trace per command: REST -> gRPC -> Pub/Sub -> webhook)
+
+services:
+  certs:
+    build: .
+    entrypoint: ["sh", "-c", "pgw certs --out /certs && chown -R 10001 /certs"]  # readable only by the app user
+    user: root
+    volumes: [certs:/certs]
+
+  pubsub:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=pgw-local
+    ports: ["8085:8085"]
+
+  vehicle-service:
+    build: .
+    command: ["vehicle-service", "--certs", "/certs", "--bus", "pubsub", "--vehicles", "50"]
+    environment:
+      PUBSUB_EMULATOR_HOST: pubsub:8085
+      PUBSUB_PROJECT: pgw-local
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    volumes: [certs:/certs:ro]
+    depends_on:
+      certs: {condition: service_completed_successfully}
+      pubsub: {condition: service_started}
+
+  gateway:
+    build: .
+    command: ["gateway", "--certs", "/certs", "--bus", "pubsub", "--vehicle-service", "vehicle-service:50051",
+              "--vehicles", "50", "--demo-partner"]
+    environment:
+      PUBSUB_EMULATOR_HOST: pubsub:8085
+      PUBSUB_PROJECT: pgw-local
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    ports: ["8080:8080"]
+    volumes: [certs:/certs:ro]
+    depends_on: [vehicle-service]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/slo-rules.yml:/etc/prometheus/slo-rules.yml:ro
+    ports: ["9090:9090"]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    ports: ["16686:16686", "4318:4318"]
+
+volumes:
+  certs:
