@@ -29,8 +29,8 @@ async def test_publish_and_subscribe_through_the_emulator():
     async def handler(m):
         got.append((m.data, m.attributes))
 
-    await bus.subscribe("t1", "t1-sub", handler)
-    await bus.publish("t1", {"hello": "world"}, {"traceparent": "00-" + "1" * 32 + "-" + "2" * 16 + "-01"})
+    await bus.subscribe("test-events", "test-events-sub", handler)  # names need 3+ chars
+    await bus.publish("test-events", {"hello": "world"}, {"traceparent": "00-" + "1" * 32 + "-" + "2" * 16 + "-01"})
     for _ in range(200):
         if got:
             break
