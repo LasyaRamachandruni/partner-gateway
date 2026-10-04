@@ -1,0 +1,50 @@
+// Internal API between the partner gateway and the vehicle service.
+// Partners never see this: they talk REST to the gateway, which talks gRPC (over mTLS) here.
+syntax = "proto3";
+
+package pgw.vehicle.v1;
+
+service VehicleService {
+  // Latest known state of one vehicle, as last reported by the car.
+  rpc GetVehicleState(GetVehicleStateRequest) returns (VehicleState);
+  // Queue a command for a vehicle. Returns as soon as the command is accepted;
+  // the car's result arrives later as an event on the `vehicle-command-results` topic.
+  rpc SendCommand(SendCommandRequest) returns (SendCommandResponse);
+}
+
+message GetVehicleStateRequest {
+  string vin = 1;
+}
+
+message VehicleState {
+  string vin = 1;
+  bool online = 2;
+  bool locked = 3;
+  int32 battery_percent = 4;
+  double odometer_km = 5;
+  double latitude = 6;
+  double longitude = 7;
+  string reported_at = 8;  // RFC 3339, when the car last reported
+}
+
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  LOCK = 1;
+  UNLOCK = 2;
+  START_CHARGING = 3;
+  STOP_CHARGING = 4;
+  HONK_AND_FLASH = 5;
+}
+
+message SendCommandRequest {
+  string command_id = 1;  // unique; the vehicle service ignores repeats (safe to retry)
+  string vin = 2;
+  CommandType type = 3;
+  string partner_id = 4;
+}
+
+message SendCommandResponse {
+  string command_id = 1;
+  bool accepted = 2;
+  bool duplicate = 3;  // true if this command_id was already accepted earlier
+}

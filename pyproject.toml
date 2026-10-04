@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "partner-gateway"
+version = "0.1.0"
+description = "A partner API gateway for connected vehicles: OAuth 2.0, gRPC over mTLS, Pub/Sub events, signed webhooks, resilience patterns and SLOs."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "httpx>=0.27",
+  "grpcio>=1.66",
+  "protobuf>=5.27",
+  "pyjwt[crypto]>=2.8",
+  "cryptography>=42",
+  "opentelemetry-api>=1.25",
+  "opentelemetry-sdk>=1.25",
+  "prometheus-client>=0.20",
+]
+
+[project.optional-dependencies]
+gcp = ["google-cloud-pubsub>=2.21"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "grpcio-tools>=1.66", "google-cloud-pubsub>=2.21"]
+
+[project.scripts]
+pgw = "pgw.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pgw*", "partner_sdk*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
