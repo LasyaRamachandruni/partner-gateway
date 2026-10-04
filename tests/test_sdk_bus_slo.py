@@ -182,3 +182,18 @@ async def test_offline_command_expires():
     assert results[0]["status"] == "EXPIRED"
     await fleet.close()
     await bus.close()
+
+
+def test_committed_prometheus_rules_match_the_slo_definitions():
+    from pathlib import Path
+
+    import yaml
+
+    from pgw.obs.slo import RULES, prometheus_rules, render_rules
+
+    committed = Path(__file__).parent.parent / "deploy" / "prometheus" / "slo-rules.yml"
+    assert committed.read_text() == render_rules(), "run `python -m pgw.obs.slo` to regenerate"
+    alerts = {r["alert"]: r for r in yaml.safe_load(committed.read_text())["groups"][1]["rules"]}
+    fast = alerts["PartnerGatewayAvailabilityBudgetBurn1h"]
+    assert "> 0.0144 and" in fast["expr"] and fast["labels"]["severity"] == "page"  # 14.4 x 0.1% budget
+    assert len(prometheus_rules()["groups"][1]["rules"]) == len(RULES) * 3 + 2
