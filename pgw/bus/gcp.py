@@ -32,13 +32,15 @@ class GcpPubSubBus:
         self.publisher = pubsub_v1.PublisherClient()
         self.subscriber = pubsub_v1.SubscriberClient()
         self._futures = []
+        self._ensured: set[str] = set()
 
     def _topic(self, topic: str) -> str:
         return self.publisher.topic_path(self.project, topic + self.suffix)
 
     def _ensure_topic(self, topic: str) -> str:
         path = self._topic(topic)
-        if self.create:
+        if self.create and path not in self._ensured:
+            self._ensured.add(path)
             from google.api_core.exceptions import AlreadyExists
 
             try:
