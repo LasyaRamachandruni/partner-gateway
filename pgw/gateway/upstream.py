@@ -1,7 +1,8 @@
 """The gateway's client for the vehicle service: mTLS, deadlines, retries, circuit breaker.
 
 Every call runs in this order:
-1. The circuit breaker decides whether to try at all. When open, it fails fast.
+1. The circuit breaker decides whether to try at all. When open, it fails fast; when
+   half open, a probe gets a single attempt with no retries.
 2. The call gets a per-attempt deadline (`timeout_s`).
 3. Transient failures (UNAVAILABLE, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED) are retried
    with jittered backoff, inside an overall deadline.
@@ -83,7 +84,10 @@ class VehicleClient:
             return result
 
         async def with_retries():
-            return await retry(attempt, self.policy, retryable=_transient,
+            # A half-open breaker is probing whether the service has recovered: one quick attempt
+            # answers that. Retrying a probe would keep the circuit undecided for a whole retry deadline.
+            policy = self.policy if self.breaker.state.value != "half_open" else RetryPolicy(attempts=1, deadline_s=None)
+            return await retry(attempt, policy, retryable=_transient,
                                on_retry=lambda n, e: self.metrics.retries.labels(method).inc())
 
         try:
