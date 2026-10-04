@@ -38,7 +38,15 @@ jobs:
       - name: Bus and full system over Pub/Sub
         env:
           PUBSUB_EMULATOR_HOST: localhost:8085
-        run: pytest -q tests/test_pubsub_emulator.py
+        run: |
+          set +e
+          pytest -q -rA tests/test_pubsub_emulator.py 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -E "^E |Error|FAILED" pytest.log | head -25 | while IFS= read -r line; do echo "::error::$line"; done
+            docker logs pubsub 2>&1 | tail -15 | while IFS= read -r line; do echo "::warning::emulator: $line"; done
+          fi
+          exit $status
 
   chaos:
     runs-on: ubuntu-latest
