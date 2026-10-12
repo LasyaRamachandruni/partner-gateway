@@ -1,0 +1,44 @@
+{
+  "target_rps": 600,
+  "duration": "60s",
+  "warmup": "15s",
+  "base_urls": 2,
+  "achieved_rps": 489.03333333333336,
+  "requests": 29342,
+  "failed_rate": 0,
+  "server_errors_including_warmup": 0,
+  "rate_limited_rate": 0,
+  "dropped_iterations": 6659,
+  "latency_ms": {
+    "all": {
+      "p50": 746.1777915,
+      "p95": 5571.7046304,
+      "p99": 6834.53494069
+    },
+    "vehicle_state": {
+      "p50": 1040.519718,
+      "p95": 5658.141084599999,
+      "p99": 6829.379097599999
+    }
+  },
+  "thresholds": {
+    "dropped_iterations{scenario:partner_api}": {
+      "count<360": false
+    },
+    "http_req_duration{scenario:partner_api}": {
+      "max>=0": true
+    },
+    "http_req_duration{scenario:partner_api,name:vehicle_state}": {
+      "p(99)<300": false
+    },
+    "http_reqs{scenario:partner_api}": {
+      "count>0": true
+    },
+    "rate_limited{scenario:partner_api}": {
+      "rate<0.01": true
+    },
+    "http_req_failed{scenario:partner_api}": {
+      "rate<0.001": true
+    }
+  }
+}

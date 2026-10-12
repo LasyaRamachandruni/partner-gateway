@@ -1,0 +1,5 @@
+target 300 rps for 60s (after 15s warm-up) over 2 URL(s)
+achieved 300.0 rps, 18001 requests, 0 dropped
+5xx/transport failures 0.000%, rate limited 0.000%
+latency all p50/p95/p99 3.2/10.4/25.7 ms; vehicle_state 3.3/8.6/21.9 ms
+thresholds: {"http_req_duration{scenario:partner_api}":{"max>=0":true},"http_req_duration{scenario:partner_api,name:vehicle_state}":{"p(99)<300":true},"dropped_iterations{scenario:partner_api}":{"count<180":true},"http_reqs{scenario:partner_api}":{"count>0":true},"http_req_failed{scenario:partner_api}":{"rate<0.001":true},"rate_limited{scenario:partner_api}":{"rate<0.01":true}}

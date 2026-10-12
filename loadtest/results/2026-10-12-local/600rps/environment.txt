@@ -1,0 +1,8 @@
+date_utc: 2026-10-12T18:16:36Z
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz x 2 vCPU
+memory_gb: 7.8
+effective_parallel_cpus: 1.7
+python: Python 3.12.13
+k6: k6 v0.54.0 (commit/baba871c8a, go1.23.1, linux/amd64)
+topology: 2 gateway replicas (1 uvicorn worker each) + 1 vehicle service, Redis, Postgres, all on this host
+command: RATE=600 DURATION=60s GATEWAYS=2 loadtest/run-local.sh

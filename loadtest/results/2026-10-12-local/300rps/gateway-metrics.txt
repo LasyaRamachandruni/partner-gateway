@@ -1,0 +1,17 @@
+pgw_http_requests_total{method="GET",route="/readyz",status="200"} 1.0
+pgw_http_requests_total{method="POST",route="/oauth/token",status="200"} 1.0
+pgw_http_requests_total{method="GET",route="/v1/vehicles",status="200"} 1398.0
+pgw_http_requests_total{method="GET",route="/v1/vehicles/{vin}",status="200"} 7369.0
+pgw_http_requests_total{method="POST",route="/v1/vehicles/{vin}/commands",status="202"} 461.0
+pgw_commands_total{status="succeeded",type="HONK_AND_FLASH"} 128.0
+pgw_commands_total{status="succeeded",type="LOCK"} 184.0
+pgw_commands_total{status="succeeded",type="UNLOCK"} 159.0
+pgw_events_consumed_total{outcome="applied",topic="vehicle-command-results"} 471.0
+pgw_http_requests_total{method="GET",route="/readyz",status="200"} 1.0
+pgw_http_requests_total{method="GET",route="/v1/vehicles/{vin}",status="200"} 7375.0
+pgw_http_requests_total{method="GET",route="/v1/vehicles",status="200"} 1372.0
+pgw_http_requests_total{method="POST",route="/v1/vehicles/{vin}/commands",status="202"} 478.0
+pgw_commands_total{status="succeeded",type="LOCK"} 149.0
+pgw_commands_total{status="succeeded",type="HONK_AND_FLASH"} 173.0
+pgw_commands_total{status="succeeded",type="UNLOCK"} 146.0
+pgw_events_consumed_total{outcome="applied",topic="vehicle-command-results"} 468.0
