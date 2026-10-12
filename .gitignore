@@ -8,3 +8,10 @@ __pycache__/
 /results/
 .terraform/
 *.tfstate*
+.coverage
+coverage.xml
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+loadtest/results/compose-*
