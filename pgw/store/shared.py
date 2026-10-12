@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from redis.asyncio import Redis
+from redis.asyncio import BlockingConnectionPool, Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
@@ -30,12 +30,23 @@ class SharedStores:
         redis_url: str,
         *,
         pool_size: int = 10,
+        redis_max_connections: int = 50,
         prefix: str = "pgw:",
         idempotency_ttl_s: float = 24 * 3600,
     ) -> SharedStores:
         engine = make_engine(database_url, pool_size=pool_size)
         sessions: async_sessionmaker[Any] = async_sessionmaker(engine, expire_on_commit=False)
-        redis = Redis.from_url(redis_url, health_check_interval=30, socket_timeout=2.0, socket_connect_timeout=2.0)
+        # A blocking pool: under a burst, requests wait briefly for a free connection instead of failing
+        # with "Too many connections" (found by the load test).
+        pool = BlockingConnectionPool.from_url(
+            redis_url,
+            max_connections=redis_max_connections,
+            timeout=2.0,
+            health_check_interval=30,
+            socket_timeout=2.0,
+            socket_connect_timeout=2.0,
+        )
+        redis = Redis(connection_pool=pool)
         return cls(
             engine,
             redis,

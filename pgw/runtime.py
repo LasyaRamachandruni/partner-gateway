@@ -41,7 +41,12 @@ def open_stores(s: Settings) -> Stores:
     if s.database_url is not None and s.redis_url is not None:
         from .store.shared import SharedStores
 
-        return SharedStores.connect(s.database_url.get_secret_value(), s.redis_url, pool_size=s.db_pool_size)
+        return SharedStores.connect(
+            s.database_url.get_secret_value(),
+            s.redis_url,
+            pool_size=s.db_pool_size,
+            redis_max_connections=s.redis_max_connections,
+        )
     log.warning("no PGW_DATABASE_URL/PGW_REDIS_URL: in-memory stores, a single replica only")
     return InMemoryStores()
 

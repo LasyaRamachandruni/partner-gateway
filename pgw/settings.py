@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = None
     redis_url: str | None = None
     db_pool_size: int = 10
+    redis_max_connections: int = 50
 
     # messaging
     bus: Literal["memory", "pubsub", "redis"] = "memory"
