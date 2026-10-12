@@ -1,46 +1,102 @@
-# The services as separate processes, with the Pub/Sub emulator as the message bus.
+# The deployed topology on one machine: two gateway replicas sharing Redis and Postgres,
+# the vehicle service, and Redis Streams as the event bus.
 #
 #   docker compose up --build
-#   docker compose logs gateway | grep client_id        # demo partner credentials
+#   docker compose logs partner                 # load-test partner credentials (client_id, client_secret)
 #
-#   Gateway API  http://localhost:8080        Prometheus  http://localhost:9090 (SLO alert rules loaded)
-#   Jaeger UI    http://localhost:16686       (one trace per command: REST -> gRPC -> Pub/Sub -> webhook)
+#   Gateway replicas  http://localhost:8080  http://localhost:8081
+#   Prometheus        http://localhost:9090 (SLO alert rules loaded)
+#   Jaeger UI         http://localhost:16686  (one trace per command: REST -> gRPC -> event -> webhook)
+#
+# Load test against both replicas (k6 in a container; see loadtest/gateway.js):
+#   CLIENT_ID=... CLIENT_SECRET=... RATE=300 docker compose --profile loadtest run --rm k6
+
+x-app: &app
+  build: .
+  image: partner-gateway:local
+  environment: &app-env
+    PGW_DATABASE_URL: postgresql+asyncpg://pgw:pgw@postgres:5432/pgw
+    PGW_REDIS_URL: redis://redis:6379/0
+    PGW_BUS: redis
+    PGW_CERTS_DIR: /certs
+    PGW_SIGNING_KEYS_FILE: /keys/keyset.json
+    PGW_VEHICLE_SERVICE: vehicle-service:50051
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  volumes: [certs:/certs:ro, keys:/keys:ro]
+
+x-gateway: &gateway
+  <<: *app
+  command: ["gateway"]
+  depends_on:
+    migrate: {condition: service_completed_successfully}
+    keys: {condition: service_completed_successfully}
+    vehicle-service: {condition: service_started}
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/readyz')"]
+    interval: 5s
+    retries: 12
 
 services:
   certs:
     build: .
+    image: partner-gateway:local
     entrypoint: ["sh", "-c", "pgw certs --out /certs && chown -R 10001 /certs"]  # readable only by the app user
     user: root
     volumes: [certs:/certs]
 
-  pubsub:
-    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
-    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=pgw-local
-    ports: ["8085:8085"]
+  keys:
+    build: .
+    image: partner-gateway:local
+    entrypoint: ["sh", "-c", "test -f /keys/keyset.json || pgw keys init /keys/keyset.json; chown -R 10001 /keys"]
+    user: root
+    volumes: [keys:/keys]
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pgw
+      POSTGRES_PASSWORD: pgw
+      POSTGRES_DB: pgw
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "pgw"]
+      interval: 2s
+
+  migrate:
+    <<: *app
+    command: ["db", "upgrade"]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  partner:
+    <<: *app
+    command: ["partners", "create", "--name", "Load test", "--demo-vins", "50", "--rate", "2000", "--burst", "4000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
 
   vehicle-service:
-    build: .
-    command: ["vehicle-service", "--certs", "/certs", "--bus", "pubsub", "--vehicles", "50"]
+    <<: *app
+    command: ["vehicle-service", "--vehicles", "50"]
     environment:
-      PUBSUB_EMULATOR_HOST: pubsub:8085
-      PUBSUB_PROJECT: pgw-local
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
-    volumes: [certs:/certs:ro]
+      <<: *app-env
+      PGW_TIME_SCALE: "0.05"
     depends_on:
       certs: {condition: service_completed_successfully}
-      pubsub: {condition: service_started}
+      redis: {condition: service_healthy}
 
-  gateway:
-    build: .
-    command: ["gateway", "--certs", "/certs", "--bus", "pubsub", "--vehicle-service", "vehicle-service:50051",
-              "--vehicles", "50", "--demo-partner"]
-    environment:
-      PUBSUB_EMULATOR_HOST: pubsub:8085
-      PUBSUB_PROJECT: pgw-local
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  gateway-a:
+    <<: *gateway
     ports: ["8080:8080"]
-    volumes: [certs:/certs:ro]
-    depends_on: [vehicle-service]
+
+  gateway-b:
+    <<: *gateway
+    ports: ["8081:8080"]
 
   prometheus:
     image: prom/prometheus:v2.54.1
@@ -53,5 +109,22 @@ services:
     image: jaegertracing/all-in-one:1.60
     ports: ["16686:16686", "4318:4318"]
 
+  k6:
+    image: grafana/k6:0.54.0
+    profiles: ["loadtest"]
+    command: ["run", "--no-usage-report", "/loadtest/gateway.js"]
+    environment:
+      BASE_URLS: http://gateway-a:8080,http://gateway-b:8080
+      CLIENT_ID: ${CLIENT_ID:-}
+      CLIENT_SECRET: ${CLIENT_SECRET:-}
+      RATE: ${RATE:-300}
+      DURATION: ${DURATION:-60s}
+      SUMMARY_PATH: /loadtest/results/compose-k6-summary.json
+    volumes: ["./loadtest:/loadtest"]
+    depends_on:
+      gateway-a: {condition: service_healthy}
+      gateway-b: {condition: service_healthy}
+
 volumes:
   certs:
+  keys:
