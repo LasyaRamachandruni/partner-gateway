@@ -10,11 +10,13 @@ resource "google_pubsub_topic" "events" {
   for_each                   = toset(local.topics)
   name                       = "${each.key}-${var.env}"
   message_retention_duration = "86400s"
+  depends_on                 = [google_project_service.apis]
 }
 
 resource "google_pubsub_topic" "dead_letter" {
-  for_each = toset(local.topics)
-  name     = "${each.key}-${var.env}-dead-letter"
+  for_each   = toset(local.topics)
+  name       = "${each.key}-${var.env}-dead-letter"
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_pubsub_subscription" "gateway_command_results" {

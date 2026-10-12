@@ -3,11 +3,13 @@
 resource "google_service_account" "gateway" {
   account_id   = "partner-gateway-${var.env}"
   display_name = "Partner gateway (${var.env})"
+  depends_on   = [google_project_service.apis]
 }
 
 resource "google_service_account" "vehicle_service" {
   account_id   = "vehicle-service-${var.env}"
   display_name = "Vehicle service (${var.env})"
+  depends_on   = [google_project_service.apis]
 }
 
 # The vehicle service publishes events; it can't read them.

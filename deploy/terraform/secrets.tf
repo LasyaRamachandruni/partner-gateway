@@ -1,6 +1,12 @@
-# Secrets are declared here; their values are added out of band (never in Terraform state):
-#   gcloud secrets versions add pgw-token-signing-key-dev --data-file=key.pem
-# Rotation adds a new version; the gateway stages the new key in its JWKS before signing with it.
+# Secrets are declared here; their values are added out of band (never in Terraform state).
+#
+# token-signing-key holds the gateway's signing key set (pgw/auth/keys.py). `make keys` creates it:
+#   pgw keys init keyset.json && gcloud secrets versions add pgw-token-signing-key-dev --data-file=keyset.json
+# Rotation (`make rotate-keys`) adds versions: stage, then activate, then prune. Every gateway
+# replica re-reads the latest version every minute, so no deploy is needed.
+#
+# The mTLS secrets are for running the services outside Cloud Run (GKE, VMs): Cloud Run terminates
+# TLS itself, so there the gateway authenticates to the vehicle service with an ID token instead.
 
 locals {
   gateway_secrets         = ["token-signing-key", "mtls-client-key", "mtls-client-cert", "mtls-ca"]
@@ -13,6 +19,7 @@ resource "google_secret_manager_secret" "gateway" {
   replication {
     auto {}
   }
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_secret_manager_secret" "vehicle_service" {
@@ -21,6 +28,7 @@ resource "google_secret_manager_secret" "vehicle_service" {
   replication {
     auto {}
   }
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_secret_manager_secret_iam_member" "gateway_reads_its_secrets" {
