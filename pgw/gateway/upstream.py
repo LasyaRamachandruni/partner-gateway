@@ -13,11 +13,18 @@ SendCommand is safe to retry because the vehicle service deduplicates command
 ids: a retry after a lost response can't run the command twice.
 
 Trace context goes along as gRPC metadata.
+
+How the gateway proves who it is depends on where the vehicle service runs:
+mTLS with the internal CA (`tls=`), or, on Cloud Run, a Google-signed ID token
+over the platform's TLS (`credentials=id_token_credentials(audience)`).
 """
 
 from __future__ import annotations
 
+import threading
 import time
+from collections.abc import Callable
+from typing import Any
 
 import grpc
 
@@ -45,14 +52,55 @@ def _transient(exc: BaseException) -> bool:
     return isinstance(exc, grpc.aio.AioRpcError) and exc.code() in TRANSIENT
 
 
+class _IdTokenPlugin(grpc.AuthMetadataPlugin):
+    """Adds `authorization: Bearer <Google ID token>` for a Cloud Run audience, refreshed before it expires."""
+
+    def __init__(self, audience: str, fetch: Callable[[str], str] | None = None) -> None:
+        self.audience = audience
+        self._fetch = fetch or _fetch_id_token
+        self._token: str | None = None
+        self._expires = 0.0
+        self._lock = threading.Lock()
+
+    def __call__(self, context: Any, callback: Any) -> None:
+        try:
+            with self._lock:
+                if self._token is None or time.time() > self._expires:
+                    self._token = self._fetch(self.audience)
+                    self._expires = time.time() + 45 * 60  # Google ID tokens live one hour
+                token = self._token
+            callback((("authorization", f"Bearer {token}"),), None)
+        except Exception as e:
+            callback((), e)
+
+
+def _fetch_id_token(audience: str) -> str:
+    import google.auth.transport.requests  # optional dependency: pip install .[gcp]
+    import google.oauth2.id_token
+
+    token: str = google.oauth2.id_token.fetch_id_token(google.auth.transport.requests.Request(), audience)
+    return token
+
+
+def id_token_credentials(audience: str, fetch: Callable[[str], str] | None = None) -> grpc.ChannelCredentials:
+    """Public-CA TLS plus a Google ID token per call: how one Cloud Run service calls another."""
+    return grpc.composite_channel_credentials(grpc.ssl_channel_credentials(),
+                                              grpc.metadata_call_credentials(_IdTokenPlugin(audience, fetch)))
+
+
 class VehicleClient:
     def __init__(self, target: str, *, tls: tuple[bytes, bytes, bytes] | None = None,
+                 credentials: grpc.ChannelCredentials | None = None,
                  server_name: str | None = None, timeout_s: float = 1.0,
-                 policy: RetryPolicy = RetryPolicy(), breaker: CircuitBreaker | None = None,
+                 policy: RetryPolicy | None = None, breaker: CircuitBreaker | None = None,
                  metrics: Metrics | None = None, resilient: bool = True):
-        """`tls` = (ca_pem, client_cert_pem, client_key_pem). `resilient=False` disables retries and the
-        breaker (used only by the chaos experiment as the baseline to compare against)."""
-        if tls:
+        """`tls` = (ca_pem, client_cert_pem, client_key_pem) for mTLS, or `credentials` for any other channel
+        security; neither means plaintext (tests only). `resilient=False` disables retries and the breaker (used
+        only by the chaos experiment as the baseline to compare against)."""
+        policy = policy or RetryPolicy()
+        if credentials is not None:
+            self.channel = grpc.aio.secure_channel(target, credentials)
+        elif tls:
             ca, cert, key = tls
             creds = grpc.ssl_channel_credentials(root_certificates=ca, private_key=key, certificate_chain=cert)
             options = [("grpc.ssl_target_name_override", server_name)] if server_name else []
