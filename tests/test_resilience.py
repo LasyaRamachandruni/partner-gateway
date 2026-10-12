@@ -6,8 +6,8 @@ import random
 import pytest
 
 from pgw.resilience.breaker import BreakerOpen, CircuitBreaker, State
-from pgw.resilience.idempotency import IdempotencyStore, InProgress, KeyReused
-from pgw.resilience.ratelimit import RateLimiter
+from pgw.resilience.idempotency import InMemoryIdempotencyStore, InProgress, KeyReused
+from pgw.resilience.ratelimit import InMemoryRateLimiter
 from pgw.resilience.retry import RetriesExhausted, RetryPolicy, retry
 
 
@@ -23,20 +23,20 @@ class Clock:
 
 def test_bucket_allows_burst_then_refills_at_rate():
     clock = Clock()
-    rl = RateLimiter(rate=2.0, burst=3, clock=clock)
-    assert [rl.check("p").allowed for _ in range(4)] == [True, True, True, False]
-    denied = rl.check("p")
+    rl = InMemoryRateLimiter(clock=clock)
+    assert [rl.check("p", 2.0, 3).allowed for _ in range(4)] == [True, True, True, False]
+    denied = rl.check("p", 2.0, 3)
     assert denied.retry_after_s == pytest.approx(0.5)  # one token at 2/s
     clock.t += 0.5
-    assert rl.check("p").allowed and not rl.check("p").allowed
+    assert rl.check("p", 2.0, 3).allowed and not rl.check("p", 2.0, 3).allowed
     clock.t += 100
-    assert rl.check("p").remaining == 2  # capped at burst (3), minus this request
+    assert rl.check("p", 2.0, 3).remaining == 2  # capped at burst (3), minus this request
 
 
 def test_partners_have_separate_buckets():
-    rl = RateLimiter(rate=1.0, burst=1, clock=Clock())
-    assert rl.check("a").allowed and rl.check("b").allowed
-    assert not rl.check("a").allowed
+    rl = InMemoryRateLimiter(clock=Clock())
+    assert rl.check("a", 1.0, 1).allowed and rl.check("b", 1.0, 1).allowed
+    assert not rl.check("a", 1.0, 1).allowed
 
 
 # retry -----------------------------------------------------------------------
@@ -164,25 +164,33 @@ def test_client_errors_do_not_trip_the_breaker():
 
 # idempotency -------------------------------------------------------------------
 
-def test_idempotency_replays_and_rejects_reuse():
+async def test_idempotency_replays_and_rejects_reuse():
     clock = Clock()
-    s = IdempotencyStore(ttl_s=60, clock=clock)
+    s = InMemoryIdempotencyStore(ttl_s=60, clock=clock)
     body = {"type": "unlock"}
-    assert s.begin("p1", "k1", body) is None
+    assert await s.begin("p1", "k1", body) is None
     with pytest.raises(InProgress):
-        s.begin("p1", "k1", body)
-    s.finish("p1", "k1", 202, {"command_id": "c1"})
-    replay = s.begin("p1", "k1", body)
+        await s.begin("p1", "k1", body)
+    await s.finish("p1", "k1", body, 202, {"command_id": "c1"})
+    replay = await s.begin("p1", "k1", body)
     assert replay.status == 202 and replay.response == {"command_id": "c1"}
     with pytest.raises(KeyReused):
-        s.begin("p1", "k1", {"type": "lock"})
-    assert s.begin("p2", "k1", body) is None  # keys are per partner
+        await s.begin("p1", "k1", {"type": "lock"})
+    assert await s.begin("p2", "k1", body) is None  # keys are per partner
     clock.t += 61
-    assert s.begin("p1", "k1", {"type": "lock"}) is None  # expired: key free again
+    assert await s.begin("p1", "k1", {"type": "lock"}) is None  # expired: key free again
 
 
-def test_abandoned_requests_can_be_retried():
-    s = IdempotencyStore()
-    s.begin("p", "k", {"a": 1})
-    s.abandon("p", "k")
-    assert s.begin("p", "k", {"a": 1}) is None
+async def test_abandoned_requests_can_be_retried():
+    s = InMemoryIdempotencyStore()
+    await s.begin("p", "k", {"a": 1})
+    await s.abandon("p", "k")
+    assert await s.begin("p", "k", {"a": 1}) is None
+
+
+async def test_an_in_progress_key_is_released_when_its_lease_runs_out():
+    clock = Clock()
+    s = InMemoryIdempotencyStore(ttl_s=3600, lease_s=30, clock=clock)
+    await s.begin("p", "k", {"a": 1})  # the replica handling this request dies before finishing
+    clock.t += 31
+    assert await s.begin("p", "k", {"a": 1}) is None

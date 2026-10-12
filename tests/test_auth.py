@@ -24,22 +24,22 @@ def test_secrets_are_hashed_and_checked():
     assert "s3cret" not in h and check_secret("s3cret", h) and not check_secret("nope", h)
 
 
-def test_authenticate_partner():
+async def test_authenticate_partner():
     reg = PartnerRegistry()
-    p, secret = reg.register("Acme Insurance", {"vehicles:read"}, {"VIN1"})
-    assert reg.authenticate(p.client_id, secret) is p
-    assert reg.authenticate(p.client_id, "wrong") is None
-    assert reg.authenticate("pc_unknown", secret) is None
-    p.enabled = False
-    assert reg.authenticate(p.client_id, secret) is None
+    p, secret = await reg.register("Acme Insurance", {"vehicles:read"}, {"VIN1"})
+    assert (await reg.authenticate(p.client_id, secret)) == p
+    assert await reg.authenticate(p.client_id, "wrong") is None
+    assert await reg.authenticate("pc_unknown", secret) is None
+    await reg.set_enabled(p.partner_id, False)
+    assert await reg.authenticate(p.client_id, secret) is None
     with pytest.raises(ValueError):
-        reg.register("x", {"admin"}, set())
+        await reg.register("x", {"admin"}, set())
 
 
-def test_token_round_trip_and_scope_narrowing():
+async def test_token_round_trip_and_scope_narrowing():
     clock = Clock()
     svc = TokenService(KeyRing(clock=clock), clock=clock)
-    p, _ = PartnerRegistry().register("Fleet Co", {"vehicles:read", "vehicles:command"}, {"VIN1"})
+    p, _ = await PartnerRegistry().register("Fleet Co", {"vehicles:read", "vehicles:command"}, {"VIN1"})
     token, ttl, scopes = svc.issue(p, {"vehicles:read"})
     assert scopes == {"vehicles:read"} and ttl == 900
     c = svc.verify(token)
@@ -48,11 +48,11 @@ def test_token_round_trip_and_scope_narrowing():
         svc.issue(p, {"something:else"})
 
 
-def test_expired_tampered_and_unsigned_tokens_rejected():
+async def test_expired_tampered_and_unsigned_tokens_rejected():
     clock = Clock()
     ring = KeyRing(clock=clock)
     svc = TokenService(ring, clock=clock)
-    p, _ = PartnerRegistry().register("x", {"vehicles:read"}, set())
+    p, _ = await PartnerRegistry().register("x", {"vehicles:read"}, set())
     token, *_ = svc.issue(p)
 
     # expired (PyJWT checks exp against real time, so build one already expired)
@@ -77,11 +77,11 @@ def test_expired_tampered_and_unsigned_tokens_rejected():
         svc.verify(fake)
 
 
-def test_key_rotation_keeps_old_tokens_valid_until_they_expire():
+async def test_key_rotation_keeps_old_tokens_valid_until_they_expire():
     clock = Clock()
     ring = KeyRing(token_ttl_s=900, leeway_s=60, clock=clock)
     svc = TokenService(ring, clock=clock)
-    p, _ = PartnerRegistry().register("x", {"vehicles:read"}, set())
+    p, _ = await PartnerRegistry().register("x", {"vehicles:read"}, set())
     old_token, *_ = svc.issue(p)
     old_kid = ring.active.kid
 

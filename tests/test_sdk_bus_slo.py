@@ -58,7 +58,7 @@ async def test_sdk_honors_retry_after_and_keeps_the_idempotency_key(sys_):
         cmd = await pc.send_command(vin, "UNLOCK")
     assert len(seen) == 2 and seen[0] == seen[1]  # retried with the same key
     assert len(sys_.fleet.seen) == 1  # ...so the car got one command
-    assert sys_.gateway.commands.commands[cmd["command_id"]]
+    assert await sys_.gateway.stores.commands.get(cmd["command_id"])
 
 
 async def test_sdk_refreshes_token_on_401(sys_):

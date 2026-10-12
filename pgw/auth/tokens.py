@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable
 
 import jwt
 
@@ -51,7 +51,7 @@ class TokenService:
         claims = {"iss": ISSUER, "aud": AUDIENCE, "sub": partner.partner_id, "client_id": partner.client_id,
                   "scope": " ".join(sorted(scopes)), "iat": now, "nbf": now, "exp": now + self.keys.token_ttl_s,
                   "jti": uuid.uuid4().hex}
-        token = jwt.encode(claims, key.private_pem(), algorithm="ES256", headers={"kid": key.kid})
+        token = jwt.encode(claims, key.private, algorithm="ES256", headers={"kid": key.kid})
         return token, self.keys.token_ttl_s, scopes
 
     def verify(self, token: str) -> Claims:

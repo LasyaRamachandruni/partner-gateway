@@ -136,7 +136,8 @@ async def test_idempotency_key_prevents_double_commands(api, auth, sys_):
 
 async def test_rate_limit_returns_retry_after(api, sys_):
     sys_.partner.rate_per_s, sys_.partner.burst = 1.0, 3
-    sys_.gateway._limiters.clear()
+    await sys_.gateway.stores.partners.save(sys_.partner)
+    sys_.gateway.partners.invalidate(sys_.partner.partner_id)
     h = {"Authorization": f"Bearer {await token(api, sys_)}"}
     codes = [(await api.get("/v1/vehicles", headers=h)) for _ in range(5)]
     assert [r.status_code for r in codes] == [200, 200, 200, 429, 429]
@@ -149,7 +150,7 @@ async def test_webhook_retries_then_succeeds(api, auth, sys_, receiver):
     receiver.fail_next = 2
     await api.post("/v1/webhooks/test", headers=auth)
     await _wait(lambda: receiver.received)
-    d = next(iter(sys_.gateway.webhooks.deliveries.values()))
+    d = sys_.gateway.stores.deliveries.all()[0]
     assert d.status == "delivered" and d.attempts == 3
 
 
@@ -169,13 +170,13 @@ async def test_webhook_4xx_is_not_retried(api, auth, sys_, receiver):
     receiver.fail_next, receiver.status_on_fail = 1, 400
     await api.post("/v1/webhooks/test", headers=auth)
     await sys_.gateway.webhooks.drain()
-    d = next(iter(sys_.gateway.webhooks.deliveries.values()))
+    d = sys_.gateway.stores.deliveries.all()[0]
     assert d.status == "dead" and d.attempts == 1
 
 
 async def test_webhook_secret_rotation_signs_with_both(api, auth, sys_, receiver):
     old = sys_.partner.webhook_secrets[0]
-    new = sys_.gateway.partners.rotate_webhook_secret(sys_.partner.partner_id)
+    new = await sys_.gateway.partners.rotate_webhook_secret(sys_.partner.partner_id)
     await api.post("/v1/webhooks/test", headers=auth)
     await _wait(lambda: receiver.received)
     h = receiver.received[0]
@@ -200,7 +201,7 @@ async def test_lost_result_expires_command(api, auth, sys_):
     vin = sorted(sys_.partner.vins)[4]
     sys_.fleet.set_online(vin, False)
     cid = (await api.post(f"/v1/vehicles/{vin}/commands", json={"type": "LOCK"}, headers=auth)).json()["command_id"]
-    assert sys_.gateway.commands.sweep(now=time.time() + 1000) == 1
+    assert await sys_.gateway.commands.sweep(now=time.time() + 1000) == 1
     assert (await api.get(f"/v1/commands/{cid}", headers=auth)).json()["status"] == "expired"
 
 

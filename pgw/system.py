@@ -9,10 +9,13 @@ simulated (the bus is in memory unless a Pub/Sub one is passed in).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
+import grpc
 import httpx
 
 from . import certs
+from .auth.keys import KeyRing
 from .auth.partners import Partner, PartnerRegistry
 from .bus.base import Bus
 from .bus.memory import InMemoryBus
@@ -22,20 +25,22 @@ from .gateway.webhooks import WebhookDispatcher
 from .obs.metrics import Metrics
 from .resilience.breaker import CircuitBreaker
 from .resilience.retry import RetryPolicy
+from .store.base import Stores
+from .store.memory import InMemoryStores
 from .vehicles.fleet import Fleet
-from .vehicles.service import Chaos, serve
+from .vehicles.service import Chaos, VehicleServicer, serve
 
 
 @dataclass
 class System:
     fleet: Fleet
     bus: Bus
-    server: object
-    servicer: object
+    server: grpc.aio.Server
+    servicer: VehicleServicer
     port: int
     vehicles: VehicleClient
     gateway: Gateway
-    app: object
+    app: Any
     partner: Partner
     secret: str
     webhook_client: httpx.AsyncClient
@@ -56,7 +61,8 @@ async def build(*, vehicles: int = 10, time_scale: float = 0.01, chaos: Chaos | 
                 webhook_backoff_s: tuple[float, ...] = (0.01, 0.02, 0.04), retry: RetryPolicy | None = None,
                 breaker: CircuitBreaker | None = None, timeout_s: float = 1.0, rate: tuple[float, int] = (50.0, 100),
                 command_ttl_s: float = 120.0, start: bool = True, seed: int = 0,
-                host: str = "127.0.0.1", port: int = 0) -> System:
+                host: str = "127.0.0.1", port: int = 0, stores: Stores | None = None,
+                keys: KeyRing | None = None) -> System:
     bundle = certs.generate()
     bus = bus or InMemoryBus(seed=seed)
     fleet = Fleet(bus, [f"1FTVW1EL{seed:01d}{i:08d}" for i in range(vehicles)], seed=seed, time_scale=time_scale)
@@ -67,14 +73,17 @@ async def build(*, vehicles: int = 10, time_scale: float = 0.01, chaos: Chaos | 
                            server_name="vehicle-service", timeout_s=timeout_s, metrics=metrics,
                            policy=retry or RetryPolicy(attempts=4, base_s=0.02, cap_s=0.2, deadline_s=2.0),
                            breaker=breaker, resilient=resilient)
-    registry = PartnerRegistry()
+    stores = stores or InMemoryStores()
+    registry = PartnerRegistry(stores.partners)
     vins = list(fleet.vehicles)
-    partner, secret = registry.register("Demo Insurance Co", {"vehicles:read", "vehicles:command"},
+    partner, secret = await registry.register("Demo Insurance Co", {"vehicles:read", "vehicles:command"},
                                         set(vins[: max(1, len(vins) - 2)]),  # the last two cars aren't shared
                                         rate_per_s=rate[0], burst=rate[1], webhook_url=webhook_url)
     webhook_client = httpx.AsyncClient(transport=webhook_transport)
-    dispatcher = WebhookDispatcher(webhook_client, backoff_s=webhook_backoff_s, seed=seed)
-    gw = Gateway(registry, client, bus, dispatcher, metrics=metrics, command_ttl_s=command_ttl_s)
+    dispatcher = WebhookDispatcher(webhook_client, repo=stores.deliveries, backoff_s=webhook_backoff_s, seed=seed,
+                                   poll_s=0.05)
+    gw = Gateway(registry, client, bus, dispatcher, stores=stores, keys=keys, metrics=metrics,
+                 command_ttl_s=command_ttl_s)
     if start:
         await gw.start()
     app = create_app(gw, manage_lifecycle=False)
