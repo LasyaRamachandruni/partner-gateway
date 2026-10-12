@@ -197,7 +197,7 @@ From Python:
 from partner_sdk import PartnerClient
 
 async with PartnerClient("http://localhost:8080", client_id, client_secret) as pc:
-    cmd = await pc.send_command(vin, "START_CHARGING")      # retried safely: same idempotency key
+    cmd = await pc.send_command(vin, "START_CHARGING")  # retried safely: same idempotency key
     result = await pc.wait_for_command(cmd["command_id"])
 ```
 
