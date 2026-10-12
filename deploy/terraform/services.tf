@@ -211,14 +211,14 @@ resource "google_cloud_run_v2_service" "vehicle" {
       }
 
       dynamic "env" {
-        for_each = var.vehicle_backend == "smartcar" ? { PGW_SMARTCAR_CLIENT_ID = var.smartcar_client_id } : {}
+        for_each = var.vehicle_backend == "smartcar" ? toset(["PGW_SMARTCAR_CLIENT_ID"]) : toset([])
         content {
-          name  = env.key
-          value = env.value
+          name  = env.value
+          value = var.smartcar_client_id
         }
       }
       dynamic "env" {
-        for_each = var.vehicle_backend == "smartcar" ? google_secret_manager_secret.smartcar : {}
+        for_each = google_secret_manager_secret.smartcar # empty unless vehicle_backend = "smartcar"
         content {
           name = env.key == "smartcar-client-secret" ? "PGW_SMARTCAR_CLIENT_SECRET" : "PGW_SMARTCAR_REFRESH_TOKEN"
           value_source {
