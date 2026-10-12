@@ -1,0 +1,14 @@
+# Cloud Build uploads only what the image needs.
+.git
+.venv
+.terraform
+**/__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+loadtest/
+docs/
+tests/
+deploy/
+results/
+certs/

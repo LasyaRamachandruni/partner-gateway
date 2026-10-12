@@ -47,7 +47,7 @@ def _setup_obs(service: str, settings: Any) -> None:
 
 def _out(obj: Any) -> None:
     """Command output meant for the operator (credentials, key ids) goes to stdout as JSON."""
-    sys.stdout.write(json.dumps(obj, indent=2) + "\n")
+    sys.stdout.write(json.dumps(obj) + "\n")  # one line: one log entry when run as a Cloud Run job
     sys.stdout.flush()
 
 
