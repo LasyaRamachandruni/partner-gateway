@@ -19,14 +19,15 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Awaitable, Callable, TypeVar
+from enum import StrEnum
+from typing import TypeVar
 
 T = TypeVar("T")
 
 
-class State(str, Enum):
+class State(StrEnum):
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
@@ -96,8 +97,9 @@ class CircuitBreaker:
         self._results.clear()
         self._set(State.OPEN)
 
-    async def call(self, fn: Callable[[], Awaitable[T]],
-                   counts_as_failure: Callable[[BaseException], bool] = lambda e: True) -> T:
+    async def call(
+        self, fn: Callable[[], Awaitable[T]], counts_as_failure: Callable[[BaseException], bool] = lambda e: True
+    ) -> T:
         self._before()
         try:
             result = await fn()

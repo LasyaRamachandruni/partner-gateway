@@ -28,8 +28,9 @@ class FakeSmartcar:
             form = dict(x.split("=") for x in request.content.decode().split("&"))
             assert form["grant_type"] == "refresh_token" and request.headers["authorization"].startswith("Basic ")
             self.valid_token = "access-2"
-            return httpx.Response(200, json={"access_token": "access-2", "refresh_token": "refresh-2",
-                                             "expires_in": 7200})
+            return httpx.Response(
+                200, json={"access_token": "access-2", "refresh_token": "refresh-2", "expires_in": 7200}
+            )
         body = json.loads(request.content) if request.content else None
         auth = request.headers.get("authorization")
         self.calls.append((request.method, request.url.path, body, request.headers.get("sc-unit-system", "")))
@@ -52,8 +53,10 @@ class FakeSmartcar:
             self.locked = body["action"] == "LOCK"
             return httpx.Response(200, json={"status": "success"})
         if path == "/vehicles/sc-1/charge":
-            return httpx.Response(409, json={"type": "VEHICLE_STATE", "code": "CHARGE_FAULT",
-                                             "description": "Charging plug is not connected"})
+            return httpx.Response(
+                409,
+                json={"type": "VEHICLE_STATE", "code": "CHARGE_FAULT", "description": "Charging plug is not connected"},
+            )
         if path in routes and request.method == "GET":
             return httpx.Response(200, json=routes[path])
         return httpx.Response(404, json={"type": "RESOURCE_NOT_FOUND", "description": path})
@@ -70,8 +73,9 @@ async def setup():
 
     await bus.subscribe(RESULTS_TOPIC, "test", collect)
     tokens = SmartcarTokens("access-1", "refresh-1", "client", "secret", expires_at=0.0)
-    backend = SmartcarBackend(bus, tokens, client=httpx.AsyncClient(transport=httpx.MockTransport(fake.handler)),
-                              backoff_s=0.0)
+    backend = SmartcarBackend(
+        bus, tokens, client=httpx.AsyncClient(transport=httpx.MockTransport(fake.handler)), backoff_s=0.0
+    )
     await backend.start()
     yield fake, backend, bus, results
     await backend.close()

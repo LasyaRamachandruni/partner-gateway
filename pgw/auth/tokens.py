@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import time
 import uuid
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import jwt
 
@@ -48,9 +48,17 @@ class TokenService:
             raise TokenError("invalid_scope")
         now = int(self.clock())
         key = self.keys.active
-        claims = {"iss": ISSUER, "aud": AUDIENCE, "sub": partner.partner_id, "client_id": partner.client_id,
-                  "scope": " ".join(sorted(scopes)), "iat": now, "nbf": now, "exp": now + self.keys.token_ttl_s,
-                  "jti": uuid.uuid4().hex}
+        claims = {
+            "iss": ISSUER,
+            "aud": AUDIENCE,
+            "sub": partner.partner_id,
+            "client_id": partner.client_id,
+            "scope": " ".join(sorted(scopes)),
+            "iat": now,
+            "nbf": now,
+            "exp": now + self.keys.token_ttl_s,
+            "jti": uuid.uuid4().hex,
+        }
         token = jwt.encode(claims, key.private, algorithm="ES256", headers={"kid": key.kid})
         return token, self.keys.token_ttl_s, scopes
 
@@ -64,8 +72,15 @@ class TokenService:
             raise TokenError("unknown signing key")
         try:
             # algorithms is pinned: a token claiming "none" or HS256 is rejected
-            c = jwt.decode(token, key, algorithms=["ES256"], audience=AUDIENCE, issuer=ISSUER, leeway=LEEWAY_S,
-                           options={"require": ["exp", "iat", "sub", "aud", "iss"]})
+            c = jwt.decode(
+                token,
+                key,
+                algorithms=["ES256"],
+                audience=AUDIENCE,
+                issuer=ISSUER,
+                leeway=LEEWAY_S,
+                options={"require": ["exp", "iat", "sub", "aud", "iss"]},
+            )
         except jwt.ExpiredSignatureError as exc:
             raise TokenError("token expired") from exc
         except jwt.PyJWTError as exc:

@@ -52,8 +52,9 @@ def open_bus(s: Settings, stores: Stores | None = None) -> Bus:
 
         from .bus.gcp import GcpPubSubBus
 
-        return GcpPubSubBus(s.pubsub_project, create=bool(os.environ.get("PUBSUB_EMULATOR_HOST")),
-                            suffix=s.pubsub_suffix)
+        return GcpPubSubBus(
+            s.pubsub_project, create=bool(os.environ.get("PUBSUB_EMULATOR_HOST")), suffix=s.pubsub_suffix
+        )
     if s.bus == "redis":
         from redis.asyncio import Redis
 
@@ -73,13 +74,22 @@ def open_bus(s: Settings, stores: Stores | None = None) -> Bus:
 def vehicle_client(s: Settings, metrics: Any = None) -> VehicleClient:
     if s.vehicle_auth == "google-id-token":
         audience = "https://" + s.vehicle_service.split(":")[0]
-        return VehicleClient(s.vehicle_service, credentials=id_token_credentials(audience),
-                             timeout_s=s.vehicle_timeout_s, metrics=metrics)
+        return VehicleClient(
+            s.vehicle_service,
+            credentials=id_token_credentials(audience),
+            timeout_s=s.vehicle_timeout_s,
+            metrics=metrics,
+        )
     if s.vehicle_auth == "insecure":
         return VehicleClient(s.vehicle_service, timeout_s=s.vehicle_timeout_s, metrics=metrics)
     bundle = certs.load(s.certs_dir)
-    return VehicleClient(s.vehicle_service, server_name="vehicle-service", timeout_s=s.vehicle_timeout_s,
-                         tls=(bundle.ca.cert_pem, bundle.client.cert_pem, bundle.client.key_pem), metrics=metrics)
+    return VehicleClient(
+        s.vehicle_service,
+        server_name="vehicle-service",
+        timeout_s=s.vehicle_timeout_s,
+        tls=(bundle.ca.cert_pem, bundle.client.cert_pem, bundle.client.key_pem),
+        metrics=metrics,
+    )
 
 
 @dataclass
@@ -97,21 +107,33 @@ class GatewayRuntime:
         await self.stores.close()
 
 
-async def build_gateway(s: Settings, *, stores: Stores | None = None, vehicles: VehicleClient | None = None,
-                        bus: Bus | None = None) -> GatewayRuntime:
+async def build_gateway(
+    s: Settings, *, stores: Stores | None = None, vehicles: VehicleClient | None = None, bus: Bus | None = None
+) -> GatewayRuntime:
     stores = stores or open_stores(s)
     bus = bus or open_bus(s, stores)
     provider = key_provider(s)
-    keys = (await KeyRing.from_provider(provider, token_ttl_s=s.token_ttl_s) if provider
-            else KeyRing(token_ttl_s=s.token_ttl_s))
+    keys = (
+        await KeyRing.from_provider(provider, token_ttl_s=s.token_ttl_s)
+        if provider
+        else KeyRing(token_ttl_s=s.token_ttl_s)
+    )
     if provider is None:
         log.warning("no signing key source configured: generated a key in memory (local use only)")
     client = vehicles or vehicle_client(s)
     webhook_client = httpx.AsyncClient()
     dispatcher = WebhookDispatcher(webhook_client, repo=stores.deliveries, poll_s=s.webhook_poll_s)
     registry = PartnerRegistry(stores.partners, cache_ttl_s=s.partner_cache_ttl_s)
-    gw = Gateway(registry, client, bus, dispatcher, stores=stores, keys=keys, command_ttl_s=s.command_ttl_s,
-                 keys_refresh_s=s.keys_refresh_s)
+    gw = Gateway(
+        registry,
+        client,
+        bus,
+        dispatcher,
+        stores=stores,
+        keys=keys,
+        command_ttl_s=s.command_ttl_s,
+        keys_refresh_s=s.keys_refresh_s,
+    )
     return GatewayRuntime(gw, stores, bus, webhook_client)
 
 

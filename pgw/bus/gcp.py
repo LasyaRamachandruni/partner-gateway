@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable
+from typing import Any
 
 from .base import Handler, Message
 
@@ -31,7 +33,7 @@ class GcpPubSubBus:
         self.suffix = suffix  # Terraform names resources per environment: vehicle-command-results-dev
         self.publisher = pubsub_v1.PublisherClient()
         self.subscriber = pubsub_v1.SubscriberClient()
-        self._futures = []
+        self._futures: list[Any] = []
         self._ensured: set[str] = set()
 
     def _topic(self, topic: str) -> str:
@@ -66,14 +68,15 @@ class GcpPubSubBus:
                 pass
         loop = asyncio.get_running_loop()
 
-        def callback(raw) -> None:  # runs on a Pub/Sub client thread
-            msg = Message(raw.message_id, topic, json.loads(raw.data), dict(raw.attributes),
-                          (raw.delivery_attempt or 1))
-            fut = asyncio.run_coroutine_threadsafe(handler(msg), loop)
+        def callback(raw: Any) -> None:  # runs on a Pub/Sub client thread
+            msg = Message(
+                raw.message_id, topic, json.loads(raw.data), dict(raw.attributes), (raw.delivery_attempt or 1)
+            )
+            fut = asyncio.run_coroutine_threadsafe(_as_coro(handler(msg)), loop)
             try:
                 fut.result(timeout=self.ack_timeout_s)
                 raw.ack()
-            except Exception:  # noqa: BLE001 - nack: Pub/Sub redelivers, then dead-letters per policy
+            except Exception:
                 raw.nack()
 
         self._futures.append(self.subscriber.subscribe(sub_path, callback=callback))
@@ -83,3 +86,7 @@ class GcpPubSubBus:
             f.cancel()
         self._futures.clear()
         await asyncio.to_thread(self.subscriber.close)
+
+
+async def _as_coro(aw: Awaitable[None]) -> None:
+    await aw

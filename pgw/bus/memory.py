@@ -18,8 +18,13 @@ DEAD_LETTER_SUFFIX = ".dead-letter"
 
 
 class InMemoryBus:
-    def __init__(self, max_deliveries: int = 5, base_backoff_s: float = 0.01, duplicate_rate: float = 0.0,
-                 seed: int | None = None):
+    def __init__(
+        self,
+        max_deliveries: int = 5,
+        base_backoff_s: float = 0.01,
+        duplicate_rate: float = 0.0,
+        seed: int | None = None,
+    ):
         self.max_deliveries = max_deliveries
         self.base_backoff_s = base_backoff_s
         self.duplicate_rate = duplicate_rate
@@ -49,7 +54,7 @@ class InMemoryBus:
             self._inflight += 1
             try:
                 await handler(msg)
-            except Exception:  # noqa: BLE001 - nack: redeliver later or dead-letter
+            except Exception:
                 if msg.delivery_attempt >= self.max_deliveries:
                     self.dead_letters[topic + DEAD_LETTER_SUFFIX].append(msg)
                 else:
@@ -69,7 +74,7 @@ class InMemoryBus:
         end = loop.time() + timeout
         while loop.time() < end:
             if self._inflight == 0 and all(q.empty() for subs in self._subs.values() for _, q in subs):
-                await asyncio.sleep(self.base_backoff_s * 2 ** self.max_deliveries)  # pending call_later retries
+                await asyncio.sleep(self.base_backoff_s * 2**self.max_deliveries)  # pending call_later retries
                 if self._inflight == 0 and all(q.empty() for subs in self._subs.values() for _, q in subs):
                     return
             await asyncio.sleep(0.005)

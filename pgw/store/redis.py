@@ -118,15 +118,16 @@ class RedisIdempotencyStore:
             raise InProgress(f"a request with Idempotency-Key {key!r} is still being processed")
         return Stored(rec["h"], int(rec["s"]), json.loads(rec["r"]), 0.0)  # r is kept as text: no float rounding
 
-    async def finish(self, partner_id: str, key: str, body: dict[str, Any], status: int,
-                     response: dict[str, Any]) -> None:
+    async def finish(
+        self, partner_id: str, key: str, body: dict[str, Any], status: int, response: dict[str, Any]
+    ) -> None:
         # The script checks the body hash again, so a request whose lease ran out can't overwrite
         # the record of a different request that took the key over in the meantime.
-        done = await self._finish(keys=[self._key(partner_id, key)],
-                                  args=[body_hash(body), status, json.dumps(response), self.ttl_ms])
+        done = await self._finish(
+            keys=[self._key(partner_id, key)], args=[body_hash(body), status, json.dumps(response), self.ttl_ms]
+        )
         if not int(done):
-            log.warning("idempotency key was taken over before the request finished",
-                        extra={"partner_id": partner_id})
+            log.warning("idempotency key was taken over before the request finished", extra={"partner_id": partner_id})
 
     async def abandon(self, partner_id: str, key: str) -> None:
         await self.redis.delete(self._key(partner_id, key))

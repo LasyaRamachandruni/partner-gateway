@@ -38,8 +38,18 @@ DEAD_LETTER_SUFFIX = ".dead-letter"
 
 
 class RedisStreamsBus:
-    def __init__(self, redis: Redis, *, prefix: str = "pgw:", max_deliveries: int = 5, retry_after_s: float = 5.0,
-                 block_ms: int = 1000, batch: int = 50, maxlen: int = 100_000, owns_redis: bool = False) -> None:
+    def __init__(
+        self,
+        redis: Redis,
+        *,
+        prefix: str = "pgw:",
+        max_deliveries: int = 5,
+        retry_after_s: float = 5.0,
+        block_ms: int = 1000,
+        batch: int = 50,
+        maxlen: int = 100_000,
+        owns_redis: bool = False,
+    ) -> None:
         self.redis = redis
         self.owns_redis = owns_redis  # close the connection pool on close()
         self.prefix = prefix
@@ -55,8 +65,12 @@ class RedisStreamsBus:
         return f"{self.prefix}stream:{topic}"
 
     async def publish(self, topic: str, data: dict[str, Any], attributes: dict[str, str] | None = None) -> str:
-        mid = await self.redis.xadd(self._stream(topic), {"data": json.dumps(data), "attrs": json.dumps(attributes or {})},
-                                    maxlen=self.maxlen, approximate=True)
+        mid = await self.redis.xadd(
+            self._stream(topic),
+            {"data": json.dumps(data), "attrs": json.dumps(attributes or {})},
+            maxlen=self.maxlen,
+            approximate=True,
+        )
         return mid.decode() if isinstance(mid, bytes) else str(mid)
 
     async def subscribe(self, topic: str, subscription: str, handler: Handler) -> None:
@@ -66,33 +80,45 @@ class RedisStreamsBus:
         except ResponseError as e:
             if "BUSYGROUP" not in str(e):
                 raise
-        self._tasks.append(asyncio.create_task(self._consume(topic, stream, subscription, handler),
-                                               name=f"sub:{subscription}"))
+        self._tasks.append(
+            asyncio.create_task(self._consume(topic, stream, subscription, handler), name=f"sub:{subscription}")
+        )
 
     async def _consume(self, topic: str, stream: str, group: str, handler: Handler) -> None:
         cursor = "0-0"
         while True:
             try:
                 # messages other consumers (or this one) failed or abandoned
-                reclaimed = await self.redis.xautoclaim(stream, group, self.consumer, self.retry_after_ms,
-                                                        start_id=cursor, count=self.batch)
+                reclaimed: Any = await self.redis.xautoclaim(
+                    stream, group, self.consumer, self.retry_after_ms, start_id=cursor, count=self.batch
+                )
                 cursor = _text(reclaimed[0])
                 for mid, fields in reclaimed[1]:
                     if fields:
                         await self._handle(topic, stream, group, _text(mid), fields, handler, redelivered=True)
-                fresh = await self.redis.xreadgroup(group, self.consumer, {stream: ">"}, count=self.batch,
-                                                    block=self.block_ms)
+                fresh: Any = await self.redis.xreadgroup(
+                    group, self.consumer, {stream: ">"}, count=self.batch, block=self.block_ms
+                )
                 for _, entries in fresh or []:
-                    await asyncio.gather(*(self._handle(topic, stream, group, _text(mid), fields, handler)
-                                           for mid, fields in entries))
+                    await asyncio.gather(
+                        *(self._handle(topic, stream, group, _text(mid), fields, handler) for mid, fields in entries)
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception:
                 log.exception("redis bus consumer error; retrying", extra={"subscription": group})
                 await asyncio.sleep(1.0)
 
-    async def _handle(self, topic: str, stream: str, group: str, mid: str, fields: dict[Any, Any],
-                      handler: Handler, redelivered: bool = False) -> None:
+    async def _handle(
+        self,
+        topic: str,
+        stream: str,
+        group: str,
+        mid: str,
+        fields: dict[Any, Any],
+        handler: Handler,
+        redelivered: bool = False,
+    ) -> None:
         attempts_key = f"{self.prefix}attempts:{group}"
         previous = int(await self.redis.hget(attempts_key, mid) or 0) if redelivered else 0
         data = json.loads(fields.get(b"data") or fields.get("data") or "{}")
@@ -103,8 +129,10 @@ class RedisStreamsBus:
         except Exception:
             failures = await self.redis.hincrby(attempts_key, mid, 1)
             if failures >= self.max_deliveries:
-                await self.redis.xadd(self._stream(topic + DEAD_LETTER_SUFFIX),
-                                      {"data": json.dumps(data), "attrs": json.dumps(attrs), "source_id": mid})
+                await self.redis.xadd(
+                    self._stream(topic + DEAD_LETTER_SUFFIX),
+                    {"data": json.dumps(data), "attrs": json.dumps(attrs), "source_id": mid},
+                )
                 await self._ack(stream, group, mid, attempts_key)
                 log.warning("message dead-lettered", extra={"topic": topic, "message_id": mid, "attempts": failures})
             return  # left pending: XAUTOCLAIM redelivers it after retry_after

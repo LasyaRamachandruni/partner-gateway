@@ -41,8 +41,16 @@ class PendingCommand:
 class Fleet:
     name = "simulated"
 
-    def __init__(self, bus: Bus, vins: list[str] | None = None, *, seed: int = 0, time_scale: float = 1.0,
-                 command_ttl_s: float = 60.0, latency_s: tuple[float, float] = (0.2, 1.5)) -> None:
+    def __init__(
+        self,
+        bus: Bus,
+        vins: list[str] | None = None,
+        *,
+        seed: int = 0,
+        time_scale: float = 1.0,
+        command_ttl_s: float = 60.0,
+        latency_s: tuple[float, float] = (0.2, 1.5),
+    ) -> None:
         self.bus = bus
         self.rng = random.Random(seed)
         self.time_scale = time_scale
@@ -51,11 +59,14 @@ class Fleet:
         vins = vins or [f"1FTFW1E{seed:02d}{i:08d}" for i in range(20)]
         self.vehicles: dict[str, Vehicle] = {}
         for vin in vins:
-            self.vehicles[vin] = Vehicle(vin, plugged_in=self.rng.random() < 0.5,
-                                         battery_percent=self.rng.randint(15, 95),
-                                         odometer_km=round(self.rng.uniform(1000, 80000), 1),
-                                         latitude=37.44 + self.rng.uniform(-0.2, 0.2),
-                                         longitude=-122.14 + self.rng.uniform(-0.2, 0.2))
+            self.vehicles[vin] = Vehicle(
+                vin,
+                plugged_in=self.rng.random() < 0.5,
+                battery_percent=self.rng.randint(15, 95),
+                odometer_km=round(self.rng.uniform(1000, 80000), 1),
+                latitude=37.44 + self.rng.uniform(-0.2, 0.2),
+                longitude=-122.14 + self.rng.uniform(-0.2, 0.2),
+            )
         self.seen: set[str] = set()  # command ids ever accepted: duplicates are ignored
         self.pending: dict[str, list[PendingCommand]] = {v: [] for v in self.vehicles}
         self.executed: list[str] = []
@@ -114,8 +125,16 @@ class Fleet:
             await self._publish(cmd, "EXPIRED", f"vehicle offline for more than {self.command_ttl_s:.0f}s")
 
     async def _publish(self, cmd: PendingCommand, status: str, reason: str | None) -> None:
-        await publish_result(self.bus, command_id=cmd.command_id, vin=cmd.vin, type_=cmd.type,
-                             partner_id=cmd.partner_id, trace=cmd.trace, status=status, reason=reason)
+        await publish_result(
+            self.bus,
+            command_id=cmd.command_id,
+            vin=cmd.vin,
+            type_=cmd.type,
+            partner_id=cmd.partner_id,
+            trace=cmd.trace,
+            status=status,
+            reason=reason,
+        )
 
     def set_online(self, vin: str, online: bool) -> None:
         """Connectivity changes; a reconnecting car runs its queued commands in order."""
@@ -133,9 +152,16 @@ class Fleet:
                 if v.charging:
                     v.battery_percent = min(100, v.battery_percent + 1)
                 v.reported_at = now_iso()
-                await self.bus.publish(TELEMETRY_TOPIC, {"vin": v.vin, "battery_percent": v.battery_percent,
-                                                         "locked": v.locked, "charging": v.charging,
-                                                         "reported_at": v.reported_at})
+                await self.bus.publish(
+                    TELEMETRY_TOPIC,
+                    {
+                        "vin": v.vin,
+                        "battery_percent": v.battery_percent,
+                        "locked": v.locked,
+                        "charging": v.charging,
+                        "reported_at": v.reported_at,
+                    },
+                )
                 n += 1
         return n
 

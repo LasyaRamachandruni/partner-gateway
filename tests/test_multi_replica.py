@@ -98,11 +98,20 @@ async def cluster(_schema, tmp_path) -> AsyncIterator[Cluster]:
 
     vehicle_bus = RedisStreamsBus(Redis.from_url(REDIS_URL), prefix=prefix, block_ms=50, owns_redis=True)
     fleet = Fleet(vehicle_bus, [f"1FTVW1EL0{i:08d}" for i in range(5)], time_scale=0.01)
-    server, port, _ = await serve(fleet, 0, allowed_clients={"partner-gateway"},
-                                  tls=(bundle.ca.cert_pem, bundle.server.cert_pem, bundle.server.key_pem))
+    server, port, _ = await serve(
+        fleet,
+        0,
+        allowed_clients={"partner-gateway"},
+        tls=(bundle.ca.cert_pem, bundle.server.cert_pem, bundle.server.key_pem),
+    )
 
-    settings = Settings(signing_keys=KeySet.new().dumps(), vehicle_service=f"127.0.0.1:{port}", certs_dir=tmp_path,
-                        webhook_poll_s=0.05, partner_cache_ttl_s=0.0)
+    settings = Settings(
+        signing_keys=KeySet.new().dumps(),
+        vehicle_service=f"127.0.0.1:{port}",
+        certs_dir=tmp_path,
+        webhook_poll_s=0.05,
+        partner_cache_ttl_s=0.0,
+    )
     replicas = []
     for i in range(2):
         stores = seed_stores if i == 0 else connect_shared(prefix)
@@ -116,10 +125,17 @@ async def cluster(_schema, tmp_path) -> AsyncIterator[Cluster]:
     async with contextlib.AsyncExitStack() as stack:
         hook_url = await stack.enter_async_context(http_server(receiver.app))
         partner, secret = await replicas[0].gateway.partners.register(
-            "Two-replica Insurance", {"vehicles:read", "vehicles:command"}, set(fleet.vehicles), rate_per_s=0.01,
-            burst=20, webhook_url=f"{hook_url}/hooks")
-        urls = [await stack.enter_async_context(http_server(create_app(rt.gateway, manage_lifecycle=False)))
-                for rt in replicas]
+            "Two-replica Insurance",
+            {"vehicles:read", "vehicles:command"},
+            set(fleet.vehicles),
+            rate_per_s=0.01,
+            burst=20,
+            webhook_url=f"{hook_url}/hooks",
+        )
+        urls = [
+            await stack.enter_async_context(http_server(create_app(rt.gateway, manage_lifecycle=False)))
+            for rt in replicas
+        ]
         yield Cluster(urls, replicas, fleet, receiver, partner.client_id, secret, sorted(fleet.vehicles))
     for rt in replicas:
         await rt.close()
@@ -164,10 +180,18 @@ async def test_idempotency_key_holds_across_replicas(cluster):
     vin = cluster.vins[0]
     async with httpx.AsyncClient() as http:
         h = {"Authorization": f"Bearer {await _token(http, cluster.urls[0], cluster)}", "Idempotency-Key": "same-key"}
-        first = await asyncio.gather(*(http.post(f"{cluster.urls[i % 2]}/v1/vehicles/{vin}/commands",
-                                                 json={"type": "UNLOCK"}, headers=h) for i in range(10)))
-        later = await asyncio.gather(*(http.post(f"{cluster.urls[i % 2]}/v1/vehicles/{vin}/commands",
-                                                 json={"type": "UNLOCK"}, headers=h) for i in range(4)))
+        first = await asyncio.gather(
+            *(
+                http.post(f"{cluster.urls[i % 2]}/v1/vehicles/{vin}/commands", json={"type": "UNLOCK"}, headers=h)
+                for i in range(10)
+            )
+        )
+        later = await asyncio.gather(
+            *(
+                http.post(f"{cluster.urls[i % 2]}/v1/vehicles/{vin}/commands", json={"type": "UNLOCK"}, headers=h)
+                for i in range(4)
+            )
+        )
         reused = await http.post(f"{cluster.urls[1]}/v1/vehicles/{vin}/commands", json={"type": "LOCK"}, headers=h)
     accepted = [r for r in first + later if r.status_code == 202]
     assert {r.status_code for r in first} <= {202, 409}
@@ -193,11 +217,11 @@ async def test_each_result_is_applied_once_and_notified_once(cluster):
                 break
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.3)  # time for any duplicate to show up
-        statuses = [(await http.get(f"{cluster.urls[1]}/v1/commands/{cid}", headers=h)).json()["status"]
-                    for cid in ids]
+        statuses = [(await http.get(f"{cluster.urls[1]}/v1/commands/{cid}", headers=h)).json()["status"] for cid in ids]
     completed = Counter(e["data"]["command_id"] for e in cluster.receiver.events if e["type"] == "command.completed")
     assert completed == Counter(ids)  # every command exactly once, though both replicas consume results
     assert statuses == ["succeeded"] * len(ids)
-    applied = [rt.gateway.metrics.events.labels("vehicle-command-results", "applied")._value.get()
-               for rt in cluster.replicas]
+    applied = [
+        rt.gateway.metrics.events.labels("vehicle-command-results", "applied")._value.get() for rt in cluster.replicas
+    ]
     assert sum(applied) == len(ids)

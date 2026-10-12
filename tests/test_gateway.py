@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives import serialization
 
 from partner_sdk import verify_signature
 from pgw import certs
-from pgw.gateway.upstream import VehicleClient
+from pgw.gateway.upstream import UpstreamUnavailable, VehicleClient
 from pgw.proto import vehicle_pb2 as pb
 from pgw.proto import vehicle_pb2_grpc as rpc
 
@@ -28,26 +28,43 @@ async def _wait(predicate, timeout=5.0):
 
 # OAuth -----------------------------------------------------------------------
 
+
 async def test_token_endpoint(api, sys_):
     p, s = sys_.partner, sys_.secret
-    ok = await api.post("/oauth/token", data={"grant_type": "client_credentials", "client_id": p.client_id,
-                                              "client_secret": s, "scope": "vehicles:read"})
+    ok = await api.post(
+        "/oauth/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": p.client_id,
+            "client_secret": s,
+            "scope": "vehicles:read",
+        },
+    )
     assert ok.status_code == 200 and ok.json()["scope"] == "vehicles:read"
     assert ok.headers["cache-control"] == "no-store"
     basic = base64.b64encode(f"{p.client_id}:{s}".encode()).decode()
-    assert (await api.post("/oauth/token", data={"grant_type": "client_credentials"},
-                           headers={"Authorization": f"Basic {basic}"})).status_code == 200
-    assert (await api.post("/oauth/token", data={"grant_type": "client_credentials"},
-                           auth=(p.client_id, "wrong"))).json() == {"error": "invalid_client"}
-    assert (await api.post("/oauth/token", data={"grant_type": "password"},
-                           auth=(p.client_id, s))).status_code == 400
+    assert (
+        await api.post(
+            "/oauth/token", data={"grant_type": "client_credentials"}, headers={"Authorization": f"Basic {basic}"}
+        )
+    ).status_code == 200
+    assert (
+        await api.post("/oauth/token", data={"grant_type": "client_credentials"}, auth=(p.client_id, "wrong"))
+    ).json() == {"error": "invalid_client"}
+    assert (await api.post("/oauth/token", data={"grant_type": "password"}, auth=(p.client_id, s))).status_code == 400
     jwks = (await api.get("/.well-known/jwks.json")).json()
     assert jwks["keys"][0]["kid"] == sys_.gateway.keys.active.kid
 
 
 async def test_token_endpoint_slows_down_guessing(api, sys_):
-    codes = [(await api.post("/oauth/token", data={"grant_type": "client_credentials"},
-                             auth=(sys_.partner.client_id, "guess"))).status_code for _ in range(15)]
+    codes = [
+        (
+            await api.post(
+                "/oauth/token", data={"grant_type": "client_credentials"}, auth=(sys_.partner.client_id, "guess")
+            )
+        ).status_code
+        for _ in range(15)
+    ]
     assert codes[:10] == [401] * 10 and 429 in codes[10:]
 
 
@@ -56,13 +73,15 @@ async def test_requests_need_a_valid_token_and_scope(api, sys_):
     assert (await api.get(f"/v1/vehicles/{vin}")).status_code == 401
     assert (await api.get(f"/v1/vehicles/{vin}", headers={"Authorization": "Bearer nope"})).status_code == 401
     read_only = await token(api, sys_, "vehicles:read")
-    r = await api.post(f"/v1/vehicles/{vin}/commands", json={"type": "LOCK"},
-                       headers={"Authorization": f"Bearer {read_only}"})
+    r = await api.post(
+        f"/v1/vehicles/{vin}/commands", json={"type": "LOCK"}, headers={"Authorization": f"Bearer {read_only}"}
+    )
     assert r.status_code == 403 and r.json()["error"]["code"] == "insufficient_scope"
     assert r.json()["error"]["request_id"] == r.headers["x-request-id"]
 
 
 # vehicles ----------------------------------------------------------------------
+
 
 async def test_read_vehicle_state_over_mtls_grpc(api, auth, sys_):
     vins = (await api.get("/v1/vehicles", headers=auth)).json()["vehicles"]
@@ -102,7 +121,9 @@ async def test_command_lifecycle_with_signed_webhook(api, auth, sys_, receiver):
 
 async def test_failed_and_unknown_commands(api, auth, sys_, receiver):
     vin = next(v for v in sorted(sys_.partner.vins) if not sys_.fleet.get(v).plugged_in)
-    cid = (await api.post(f"/v1/vehicles/{vin}/commands", json={"type": "START_CHARGING"}, headers=auth)).json()["command_id"]
+    cid = (await api.post(f"/v1/vehicles/{vin}/commands", json={"type": "START_CHARGING"}, headers=auth)).json()[
+        "command_id"
+    ]
     await _wait(lambda: receiver.received)
     c = (await api.get(f"/v1/commands/{cid}", headers=auth)).json()
     assert c["status"] == "failed" and c["reason"] == "vehicle is not plugged in"
@@ -114,7 +135,9 @@ async def test_failed_and_unknown_commands(api, auth, sys_, receiver):
 async def test_offline_vehicle_runs_command_on_reconnect(api, auth, sys_, receiver):
     vin = sorted(sys_.partner.vins)[1]
     sys_.fleet.set_online(vin, False)
-    cid = (await api.post(f"/v1/vehicles/{vin}/commands", json={"type": "HONK_AND_FLASH"}, headers=auth)).json()["command_id"]
+    cid = (await api.post(f"/v1/vehicles/{vin}/commands", json={"type": "HONK_AND_FLASH"}, headers=auth)).json()[
+        "command_id"
+    ]
     await asyncio.sleep(0.1)
     assert (await api.get(f"/v1/commands/{cid}", headers=auth)).json()["status"] == "pending"
     sys_.fleet.set_online(vin, True)
@@ -145,6 +168,7 @@ async def test_rate_limit_returns_retry_after(api, sys_):
 
 
 # webhooks -------------------------------------------------------------------------
+
 
 async def test_webhook_retries_then_succeeds(api, auth, sys_, receiver):
     receiver.fail_next = 2
@@ -187,6 +211,7 @@ async def test_webhook_secret_rotation_signs_with_both(api, auth, sys_, receiver
 
 # events: at-least-once ------------------------------------------------------------
 
+
 async def test_duplicate_result_events_are_ignored(api, auth, sys_, receiver):
     vin = sorted(sys_.partner.vins)[3]
     cid = (await api.post(f"/v1/vehicles/{vin}/commands", json={"type": "LOCK"}, headers=auth)).json()["command_id"]
@@ -207,18 +232,24 @@ async def test_lost_result_expires_command(api, auth, sys_):
 
 # security of the internal hop ---------------------------------------------------------
 
+
 async def test_vehicle_service_rejects_clients_without_our_certificates(sys_):
     vin = next(iter(sys_.fleet.vehicles))
     # 1. no TLS at all
     plain = VehicleClient(f"127.0.0.1:{sys_.port}", resilient=False, timeout_s=0.5)
-    with pytest.raises(Exception):
+    with pytest.raises((UpstreamUnavailable, RuntimeError)):
         await plain.get_state(vin)
     await plain.close()
     # 2. a certificate from a different CA
     other = certs.generate()
-    rogue = VehicleClient(f"127.0.0.1:{sys_.port}", resilient=False, timeout_s=0.5, server_name="vehicle-service",
-                          tls=(sys_.bundle.ca.cert_pem, other.client.cert_pem, other.client.key_pem))
-    with pytest.raises(Exception):
+    rogue = VehicleClient(
+        f"127.0.0.1:{sys_.port}",
+        resilient=False,
+        timeout_s=0.5,
+        server_name="vehicle-service",
+        tls=(sys_.bundle.ca.cert_pem, other.client.cert_pem, other.client.key_pem),
+    )
+    with pytest.raises((UpstreamUnavailable, RuntimeError)):
         await rogue.get_state(vin)
     await rogue.close()
     # 3. a valid certificate from our CA, but an identity that isn't allowed
@@ -227,8 +258,9 @@ async def test_vehicle_service_rejects_clients_without_our_certificates(sys_):
     real_key = serialization.load_pem_private_key(bundle.ca.key_pem, None)
     billing = certs.issue(real_ca, real_key, "billing-service", server=False)
     creds = grpc.ssl_channel_credentials(bundle.ca.cert_pem, billing.key_pem, billing.cert_pem)
-    async with grpc.aio.secure_channel(f"127.0.0.1:{sys_.port}", creds,
-                                       options=[("grpc.ssl_target_name_override", "vehicle-service")]) as ch:
+    async with grpc.aio.secure_channel(
+        f"127.0.0.1:{sys_.port}", creds, options=[("grpc.ssl_target_name_override", "vehicle-service")]
+    ) as ch:
         with pytest.raises(grpc.aio.AioRpcError) as e:
             await rpc.VehicleServiceStub(ch).GetVehicleState(pb.GetVehicleStateRequest(vin=vin), timeout=1)
         assert e.value.code() == grpc.StatusCode.PERMISSION_DENIED
@@ -236,10 +268,11 @@ async def test_vehicle_service_rejects_clients_without_our_certificates(sys_):
 
 # observability ---------------------------------------------------------------------
 
+
 async def test_one_trace_from_request_to_webhook(api, auth, sys_, receiver):
     SPANS.clear()
     vin = sorted(sys_.partner.vins)[0]
-    cid = (await api.post(f"/v1/vehicles/{vin}/commands", json={"type": "LOCK"}, headers=auth)).json()["command_id"]
+    await api.post(f"/v1/vehicles/{vin}/commands", json={"type": "LOCK"}, headers=auth)
     await _wait(lambda: receiver.received)
     await sys_.gateway.webhooks.drain()
     spans = SPANS.get_finished_spans()

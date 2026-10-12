@@ -35,8 +35,14 @@ __all__ = ["Command", "CommandService"]
 
 
 class CommandService:
-    def __init__(self, repo: CommandRepository, partners: PartnerRegistry, webhooks: WebhookDispatcher,
-                 metrics: Metrics, ttl_s: float = 120.0) -> None:
+    def __init__(
+        self,
+        repo: CommandRepository,
+        partners: PartnerRegistry,
+        webhooks: WebhookDispatcher,
+        metrics: Metrics,
+        ttl_s: float = 120.0,
+    ) -> None:
         self.repo = repo
         self.partners = partners
         self.webhooks = webhooks
@@ -60,13 +66,16 @@ class CommandService:
 
     async def on_result(self, msg: Message) -> None:
         with tracing.tracer("partner-gateway").start_as_current_span(
-                "command.result", context=tracing.extract(msg.attributes)):
+            "command.result", context=tracing.extract(msg.attributes)
+        ):
             data = msg.data
             status = str(data.get("status", "")).lower()
             if status not in FINAL_COMMAND_STATES:
                 self.metrics.events.labels(msg.topic, "invalid").inc()
-                log.warning("ignoring a result with an unknown status",
-                            extra={"command_id": data.get("command_id"), "status": status})
+                log.warning(
+                    "ignoring a result with an unknown status",
+                    extra={"command_id": data.get("command_id"), "status": status},
+                )
                 return
             c = await self.repo.complete(str(data.get("command_id", "")), status, data.get("reason"), time.time())
             if c is None:

@@ -56,8 +56,9 @@ class IdempotencyStore(Protocol):
         Raises KeyReused (same key, different body) or InProgress (first request still running)."""
         ...
 
-    async def finish(self, partner_id: str, key: str, body: dict[str, Any], status: int,
-                     response: dict[str, Any]) -> None: ...
+    async def finish(
+        self, partner_id: str, key: str, body: dict[str, Any], status: int, response: dict[str, Any]
+    ) -> None: ...
 
     async def abandon(self, partner_id: str, key: str) -> None:
         """The request failed before doing anything: let the partner retry with the same key."""
@@ -90,8 +91,9 @@ class InMemoryIdempotencyStore:
     async def begin(self, partner_id: str, key: str, body: dict[str, Any]) -> Stored | None:
         return self.begin_sync(partner_id, key, body)
 
-    async def finish(self, partner_id: str, key: str, body: dict[str, Any], status: int,
-                     response: dict[str, Any]) -> None:
+    async def finish(
+        self, partner_id: str, key: str, body: dict[str, Any], status: int, response: dict[str, Any]
+    ) -> None:
         s = self._items.get((partner_id, key))
         if s is not None and s.body_hash != body_hash(body):
             return  # the key was taken over by a different request after this one's lease ran out

@@ -24,8 +24,9 @@ class InvalidSignature(Exception):
     pass
 
 
-def verify_signature(body: bytes, header: str, secrets: str | list[str], *, tolerance_s: int = 300,
-                     now: float | None = None) -> int:
+def verify_signature(
+    body: bytes, header: str, secrets: str | list[str], *, tolerance_s: int = 300, now: float | None = None
+) -> int:
     """Returns the signed timestamp. Raises InvalidSignature."""
     secrets = [secrets] if isinstance(secrets, str) else secrets
     parts = [p.split("=", 1) for p in header.split(",") if "=" in p]

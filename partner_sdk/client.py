@@ -32,9 +32,18 @@ class ApiError(Exception):
 
 
 class PartnerClient:
-    def __init__(self, base_url: str, client_id: str, client_secret: str, *, scope: str | None = None,
-                 max_attempts: int = 5, transport: httpx.AsyncBaseTransport | None = None,
-                 sleep=asyncio.sleep, timeout_s: float = 10.0):
+    def __init__(
+        self,
+        base_url: str,
+        client_id: str,
+        client_secret: str,
+        *,
+        scope: str | None = None,
+        max_attempts: int = 5,
+        transport: httpx.AsyncBaseTransport | None = None,
+        sleep=asyncio.sleep,
+        timeout_s: float = 10.0,
+    ):
         self.http = httpx.AsyncClient(base_url=base_url, transport=transport, timeout=timeout_s)
         self.client_id, self.client_secret, self.scope = client_id, client_secret, scope
         self.max_attempts = max_attempts
@@ -68,19 +77,19 @@ class PartnerClient:
             return await self._fetch_token()
         return self._token
 
-    async def request(self, method: str, path: str, *, json: dict | None = None,
-                      headers: dict | None = None) -> dict:
+    async def request(self, method: str, path: str, *, json: dict | None = None, headers: dict | None = None) -> dict:
         refreshed = False
         for attempt in range(1, self.max_attempts + 1):
             token = await self._auth()
             try:
-                r = await self.http.request(method, path, json=json,
-                                            headers={"Authorization": f"Bearer {token}", **(headers or {})})
+                r = await self.http.request(
+                    method, path, json=json, headers={"Authorization": f"Bearer {token}", **(headers or {})}
+                )
             except httpx.TransportError:
                 if attempt == self.max_attempts:
                     raise
                 self.retries += 1
-                await self.sleep(random.uniform(0, min(8, 0.25 * 2 ** attempt)))
+                await self.sleep(random.uniform(0, min(8, 0.25 * 2**attempt)))
                 continue
             if r.status_code == 401 and not refreshed:
                 refreshed = True
@@ -91,7 +100,7 @@ class PartnerClient:
                     break
                 self.retries += 1
                 retry_after = r.headers.get("Retry-After")
-                await self.sleep(float(retry_after) if retry_after else random.uniform(0, 0.25 * 2 ** attempt))
+                await self.sleep(float(retry_after) if retry_after else random.uniform(0, 0.25 * 2**attempt))
                 continue
             if r.status_code >= 400:
                 break
@@ -107,8 +116,9 @@ class PartnerClient:
 
     async def send_command(self, vin: str, type_: str, idempotency_key: str | None = None) -> dict:
         key = idempotency_key or str(uuid.uuid4())
-        return await self.request("POST", f"/v1/vehicles/{vin}/commands", json={"type": type_},
-                                  headers={"Idempotency-Key": key})
+        return await self.request(
+            "POST", f"/v1/vehicles/{vin}/commands", json={"type": type_}, headers={"Idempotency-Key": key}
+        )
 
     async def get_command(self, command_id: str) -> dict:
         return await self.request("GET", f"/v1/commands/{command_id}")

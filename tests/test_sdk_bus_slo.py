@@ -14,12 +14,13 @@ from pgw.vehicles.fleet import Fleet
 
 from .test_gateway import _wait
 
-
 # SDK ---------------------------------------------------------------------------
 
+
 async def test_sdk_end_to_end(sys_, receiver):
-    async with PartnerClient("http://gw.test", sys_.partner.client_id, sys_.secret,
-                             transport=httpx.ASGITransport(sys_.app)) as pc:
+    async with PartnerClient(
+        "http://gw.test", sys_.partner.client_id, sys_.secret, transport=httpx.ASGITransport(sys_.app)
+    ) as pc:
         vins = await pc.list_vehicles()
         state = await pc.get_vehicle(vins[0])
         assert state["vin"] == vins[0]
@@ -52,8 +53,9 @@ async def test_sdk_honors_retry_after_and_keeps_the_idempotency_key(sys_):
     async def record(s):
         sleeps.append(s)
 
-    async with PartnerClient("http://gw.test", sys_.partner.client_id, sys_.secret, transport=Flaky(),
-                             sleep=record) as pc:
+    async with PartnerClient(
+        "http://gw.test", sys_.partner.client_id, sys_.secret, transport=Flaky(), sleep=record
+    ) as pc:
         vin = sorted(sys_.partner.vins)[0]
         cmd = await pc.send_command(vin, "UNLOCK")
     assert len(seen) == 2 and seen[0] == seen[1]  # retried with the same key
@@ -62,8 +64,9 @@ async def test_sdk_honors_retry_after_and_keeps_the_idempotency_key(sys_):
 
 
 async def test_sdk_refreshes_token_on_401(sys_):
-    async with PartnerClient("http://gw.test", sys_.partner.client_id, sys_.secret,
-                             transport=httpx.ASGITransport(sys_.app)) as pc:
+    async with PartnerClient(
+        "http://gw.test", sys_.partner.client_id, sys_.secret, transport=httpx.ASGITransport(sys_.app)
+    ) as pc:
         await pc.list_vehicles()
         sys_.gateway.keys.rotate()
         sys_.gateway.keys.keys = [sys_.gateway.keys.active]  # old key revoked immediately
@@ -87,6 +90,7 @@ def test_signature_verification():
 
 
 # bus -------------------------------------------------------------------------------
+
 
 async def test_bus_fanout_retry_and_dead_letter():
     bus = InMemoryBus(max_deliveries=3, base_backoff_s=0.001)
@@ -119,8 +123,9 @@ async def test_consumers_survive_heavy_redelivery(receiver):
     bus = InMemoryBus(duplicate_rate=0.5, seed=3)
     s = await system.build(bus=bus, webhook_transport=httpx.ASGITransport(receiver.app))
     try:
-        async with PartnerClient("http://gw.test", s.partner.client_id, s.secret,
-                                 transport=httpx.ASGITransport(s.app)) as pc:
+        async with PartnerClient(
+            "http://gw.test", s.partner.client_id, s.secret, transport=httpx.ASGITransport(s.app)
+        ) as pc:
             vins = sorted(s.partner.vins)
             for vin in vins:
                 await pc.send_command(vin, "LOCK")
@@ -135,6 +140,7 @@ async def test_consumers_survive_heavy_redelivery(receiver):
 
 # SLOs --------------------------------------------------------------------------------
 
+
 def test_burn_rate_and_alerts():
     slo = SLOS["availability"]  # 99.9%: budget 0.1%
     assert burn_rate(1, 1000, slo) == pytest.approx(1.0)
@@ -147,6 +153,7 @@ def test_burn_rate_and_alerts():
 
 
 # fleet ---------------------------------------------------------------------------
+
 
 async def test_fleet_ignores_repeated_command_ids():
     bus = InMemoryBus()

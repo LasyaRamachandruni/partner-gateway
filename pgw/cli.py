@@ -1,18 +1,18 @@
 """The `pgw` command.
 
-    pgw sandbox                       everything in one process + a demo partner; prints credentials
-    pgw chaos --out results/          the chaos experiment (see pgw/chaos.py)
-    pgw certs --out certs/            internal CA + service certificates for mTLS
+pgw sandbox                       everything in one process + a demo partner; prints credentials
+pgw chaos --out results/          the chaos experiment (see pgw/chaos.py)
+pgw certs --out certs/            internal CA + service certificates for mTLS
 
-    # the deployable services, configured by PGW_* environment variables (pgw/settings.py);
-    # flags override the environment:
-    pgw vehicle-service --port 50051
-    pgw gateway --port 8080
+# the deployable services, configured by PGW_* environment variables (pgw/settings.py);
+# flags override the environment:
+pgw vehicle-service --port 50051
+pgw gateway --port 8080
 
-    # operations
-    pgw db upgrade                    apply database migrations (PGW_DATABASE_URL)
-    pgw partners create --name "Acme Insurance" --demo-vins 50 --rate 1000 --burst 2000
-    pgw keys init --out keyset.json   signing key set; then: keys stage | activate | prune
+# operations
+pgw db upgrade                    apply database migrations (PGW_DATABASE_URL)
+pgw partners create --name "Acme Insurance" --demo-vins 50 --rate 1000 --burst 2000
+pgw keys init --out keyset.json   signing key set; then: keys stage | activate | prune
 """
 
 from __future__ import annotations
@@ -53,6 +53,7 @@ def _out(obj: Any) -> None:
 
 # -- local tools ------------------------------------------------------------------------
 
+
 def cmd_certs(args: argparse.Namespace) -> int:
     from . import certs
 
@@ -77,14 +78,23 @@ def cmd_sandbox(args: argparse.Namespace) -> int:
     from .demo import webhook_receiver
 
     async def main() -> None:
-        s = await system.build(vehicles=args.vehicles, time_scale=0.2,
-                               webhook_url=f"http://127.0.0.1:{args.port}/partner/hooks")
+        s = await system.build(
+            vehicles=args.vehicles, time_scale=0.2, webhook_url=f"http://127.0.0.1:{args.port}/partner/hooks"
+        )
         s.app.mount("/partner", webhook_receiver(s.partner.webhook_secrets))  # the demo partner's endpoint
-        _out({"api": f"http://127.0.0.1:{args.port}", "client_id": s.partner.client_id,
-              "client_secret": s.secret, "vehicles": sorted(s.partner.vins)[:3]})
-        sys.stdout.write("\ntry:\n  TOKEN=$(curl -s -u $CLIENT_ID:$CLIENT_SECRET -d grant_type=client_credentials "
-                         f"http://127.0.0.1:{args.port}/oauth/token | jq -r .access_token)\n"
-                         f"  curl -H \"Authorization: Bearer $TOKEN\" http://127.0.0.1:{args.port}/v1/vehicles\n\n")
+        _out(
+            {
+                "api": f"http://127.0.0.1:{args.port}",
+                "client_id": s.partner.client_id,
+                "client_secret": s.secret,
+                "vehicles": sorted(s.partner.vins)[:3],
+            }
+        )
+        sys.stdout.write(
+            "\ntry:\n  TOKEN=$(curl -s -u $CLIENT_ID:$CLIENT_SECRET -d grant_type=client_credentials "
+            f"http://127.0.0.1:{args.port}/oauth/token | jq -r .access_token)\n"
+            f'  curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:{args.port}/v1/vehicles\n\n'
+        )
         server = uvicorn.Server(uvicorn.Config(s.app, host="127.0.0.1", port=args.port, log_level="warning"))
         try:
             await server.serve()
@@ -97,13 +107,22 @@ def cmd_sandbox(args: argparse.Namespace) -> int:
 
 # -- services ---------------------------------------------------------------------------
 
+
 def cmd_vehicle_service(args: argparse.Namespace) -> int:
     from . import certs
     from .runtime import build_backend, open_bus
     from .vehicles.service import serve
 
-    settings = _settings(port=args.port, certs_dir=args.certs, bus=args.bus, host=args.host, vehicles=args.vehicles,
-                         time_scale=args.time_scale, grpc_tls=args.tls, vehicle_backend=args.backend)
+    settings = _settings(
+        port=args.port,
+        certs_dir=args.certs,
+        bus=args.bus,
+        host=args.host,
+        vehicles=args.vehicles,
+        time_scale=args.time_scale,
+        grpc_tls=args.tls,
+        vehicle_backend=args.backend,
+    )
     _setup_obs("vehicle-service", settings)
 
     async def main() -> None:
@@ -139,8 +158,9 @@ def cmd_gateway(args: argparse.Namespace) -> int:
     from .gateway.app import create_app
     from .runtime import build_gateway, demo_vins
 
-    settings = _settings(port=args.port, certs_dir=args.certs, bus=args.bus, host=args.host,
-                         vehicle_service=args.vehicle_service)
+    settings = _settings(
+        port=args.port, certs_dir=args.certs, bus=args.bus, host=args.host, vehicle_service=args.vehicle_service
+    )
     _setup_obs("partner-gateway", settings)
 
     async def main() -> None:
@@ -148,13 +168,26 @@ def cmd_gateway(args: argparse.Namespace) -> int:
         try:
             if args.demo_partner:
                 p, secret = await rt.gateway.partners.register(
-                    "Demo partner", {"vehicles:read", "vehicles:command"},
+                    "Demo partner",
+                    {"vehicles:read", "vehicles:command"},
                     set(demo_vins(args.vehicles or settings.vehicles)),
-                    webhook_url=args.webhook_url)
-                _out({"client_id": p.client_id, "client_secret": secret,
-                      "webhook_secret": (p.webhook_secrets or [None])[0]})
-            config = uvicorn.Config(create_app(rt.gateway), host=settings.host, port=settings.port,
-                                    log_config=None, access_log=False, timeout_graceful_shutdown=10)
+                    webhook_url=args.webhook_url,
+                )
+                _out(
+                    {
+                        "client_id": p.client_id,
+                        "client_secret": secret,
+                        "webhook_secret": p.webhook_secrets[0] if p.webhook_secrets else None,
+                    }
+                )
+            config = uvicorn.Config(
+                create_app(rt.gateway),
+                host=settings.host,
+                port=settings.port,
+                log_config=None,
+                access_log=False,
+                timeout_graceful_shutdown=10,
+            )
             await uvicorn.Server(config).serve()
         finally:
             await rt.close()
@@ -164,6 +197,7 @@ def cmd_gateway(args: argparse.Namespace) -> int:
 
 
 # -- operations -------------------------------------------------------------------------
+
 
 def cmd_db(args: argparse.Namespace) -> int:
     from .migrations_cli import downgrade, upgrade
@@ -194,12 +228,22 @@ def cmd_partners_create(args: argparse.Namespace) -> int:
         stores = open_stores(settings)
         try:
             p, secret = await PartnerRegistry(stores.partners).register(
-                args.name, set(args.scopes.split(",")), vins, rate_per_s=args.rate, burst=args.burst,
-                webhook_url=args.webhook_url)
+                args.name,
+                set(args.scopes.split(",")),
+                vins,
+                rate_per_s=args.rate,
+                burst=args.burst,
+                webhook_url=args.webhook_url,
+            )
         finally:
             await stores.close()
-        return {"partner_id": p.partner_id, "client_id": p.client_id, "client_secret": secret,
-                "webhook_secret": (p.webhook_secrets or [None])[0], "vins": len(p.vins)}
+        return {
+            "partner_id": p.partner_id,
+            "client_id": p.client_id,
+            "client_secret": secret,
+            "webhook_secret": p.webhook_secrets[0] if p.webhook_secrets else None,
+            "vins": len(p.vins),
+        }
 
     _out(asyncio.run(main()))
     return 0
@@ -220,8 +264,9 @@ def cmd_keys(args: argparse.Namespace) -> int:
         if args.action == "stage":
             result = {"staged": ks.stage()}
         elif args.action == "activate":
-            kid = args.kid or next((k["kid"] for k in ks.keys if k["kid"] != ks.active and not k.get("retire_after")),
-                                   None)
+            kid = args.kid or next(
+                (k["kid"] for k in ks.keys if k["kid"] != ks.active and not k.get("retire_after")), None
+            )
             if kid is None:
                 sys.stderr.write("no staged key to activate; run `pgw keys stage` first\n")
                 return 2

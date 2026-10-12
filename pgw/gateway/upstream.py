@@ -84,16 +84,25 @@ def _fetch_id_token(audience: str) -> str:
 
 def id_token_credentials(audience: str, fetch: Callable[[str], str] | None = None) -> grpc.ChannelCredentials:
     """Public-CA TLS plus a Google ID token per call: how one Cloud Run service calls another."""
-    return grpc.composite_channel_credentials(grpc.ssl_channel_credentials(),
-                                              grpc.metadata_call_credentials(_IdTokenPlugin(audience, fetch)))
+    return grpc.composite_channel_credentials(
+        grpc.ssl_channel_credentials(), grpc.metadata_call_credentials(_IdTokenPlugin(audience, fetch))
+    )
 
 
 class VehicleClient:
-    def __init__(self, target: str, *, tls: tuple[bytes, bytes, bytes] | None = None,
-                 credentials: grpc.ChannelCredentials | None = None,
-                 server_name: str | None = None, timeout_s: float = 1.0,
-                 policy: RetryPolicy | None = None, breaker: CircuitBreaker | None = None,
-                 metrics: Metrics | None = None, resilient: bool = True):
+    def __init__(
+        self,
+        target: str,
+        *,
+        tls: tuple[bytes, bytes, bytes] | None = None,
+        credentials: grpc.ChannelCredentials | None = None,
+        server_name: str | None = None,
+        timeout_s: float = 1.0,
+        policy: RetryPolicy | None = None,
+        breaker: CircuitBreaker | None = None,
+        metrics: Metrics | None = None,
+        resilient: bool = True,
+    ):
         """`tls` = (ca_pem, client_cert_pem, client_key_pem) for mTLS, or `credentials` for any other channel
         security; neither means plaintext (tests only). `resilient=False` disables retries and the breaker (used
         only by the chaos experiment as the baseline to compare against)."""
@@ -112,14 +121,15 @@ class VehicleClient:
         self.policy = policy if resilient else RetryPolicy(attempts=1, deadline_s=None)
         self.metrics = metrics or Metrics()
         self.breaker = breaker or CircuitBreaker(
-            "vehicle-service", on_state_change=lambda n, s: self.metrics.set_breaker(n, s))
+            "vehicle-service", on_state_change=lambda n, s: self.metrics.set_breaker(n, s)
+        )
         self.resilient = resilient
         self.metrics.set_breaker(self.breaker.name, self.breaker.state)
 
-    async def _call(self, method: str, request):
+    async def _call(self, method: str, request: Any) -> Any:
         fn = getattr(self.stub, method)
 
-        async def attempt():
+        async def attempt() -> Any:
             t0 = time.perf_counter()
             try:
                 result = await fn(request, timeout=self.timeout_s, metadata=tuple(tracing.inject().items()))
@@ -131,17 +141,21 @@ class VehicleClient:
             self.metrics.upstream.labels(method, "OK").inc()
             return result
 
-        async def with_retries():
+        async def with_retries() -> Any:
             # A half-open breaker is probing whether the service has recovered: one quick attempt
             # answers that. Retrying a probe would keep the circuit undecided for a whole retry deadline.
-            policy = self.policy if self.breaker.state.value != "half_open" else RetryPolicy(attempts=1, deadline_s=None)
-            return await retry(attempt, policy, retryable=_transient,
-                               on_retry=lambda n, e: self.metrics.retries.labels(method).inc())
+            policy = (
+                self.policy if self.breaker.state.value != "half_open" else RetryPolicy(attempts=1, deadline_s=None)
+            )
+            return await retry(
+                attempt, policy, retryable=_transient, on_retry=lambda n, e: self.metrics.retries.labels(method).inc()
+            )
 
         try:
             if self.resilient:
                 return await self.breaker.call(
-                    with_retries, counts_as_failure=lambda e: _transient(getattr(e, "last", e)))
+                    with_retries, counts_as_failure=lambda e: _transient(getattr(e, "last", e))
+                )
             return await with_retries()
         except grpc.aio.AioRpcError as e:
             raise self._translate(e) from e
@@ -160,11 +174,20 @@ class VehicleClient:
         return RuntimeError(f"vehicle service error {e.code().name}: {e.details()}")
 
     async def get_state(self, vin: str) -> pb.VehicleState:
-        return await self._call("GetVehicleState", pb.GetVehicleStateRequest(vin=vin))
+        state: pb.VehicleState = await self._call("GetVehicleState", pb.GetVehicleStateRequest(vin=vin))
+        return state
 
     async def send_command(self, command_id: str, vin: str, type_: str, partner_id: str) -> pb.SendCommandResponse:
-        return await self._call("SendCommand", pb.SendCommandRequest(
-            command_id=command_id, vin=vin, type=pb.CommandType.Value(type_), partner_id=partner_id))
+        resp: pb.SendCommandResponse = await self._call(
+            "SendCommand",
+            pb.SendCommandRequest(
+                command_id=command_id,
+                vin=vin,
+                type=type_,
+                partner_id=partner_id,  # enum by name
+            ),
+        )
+        return resp
 
     async def close(self) -> None:
         await self.channel.close()

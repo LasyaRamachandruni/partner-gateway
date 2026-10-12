@@ -80,8 +80,11 @@ class SmartcarTokens:
             return self.access_token
         if not (self.refresh_token and self.client_id and self.client_secret):
             raise SmartcarError(401, "AUTHENTICATION", "access token expired and no refresh token configured")
-        r = await client.post(self.auth_url, data={"grant_type": "refresh_token", "refresh_token": self.refresh_token},
-                              auth=(self.client_id, self.client_secret))
+        r = await client.post(
+            self.auth_url,
+            data={"grant_type": "refresh_token", "refresh_token": self.refresh_token},
+            auth=(self.client_id, self.client_secret),
+        )
         if r.status_code != 200:
             raise SmartcarError(r.status_code, "AUTHENTICATION", f"token refresh failed: {r.text[:200]}")
         body = r.json()
@@ -95,8 +98,16 @@ class SmartcarTokens:
 class SmartcarBackend:
     name = "smartcar"
 
-    def __init__(self, bus: Bus, tokens: SmartcarTokens, *, client: httpx.AsyncClient | None = None,
-                 api_url: str = "https://api.smartcar.com/v2.0", attempts: int = 3, backoff_s: float = 0.5) -> None:
+    def __init__(
+        self,
+        bus: Bus,
+        tokens: SmartcarTokens,
+        *,
+        client: httpx.AsyncClient | None = None,
+        api_url: str = "https://api.smartcar.com/v2.0",
+        attempts: int = 3,
+        backoff_s: float = 0.5,
+    ) -> None:
         self.bus = bus
         self.tokens = tokens
         self.client = client or httpx.AsyncClient(timeout=15.0)
@@ -110,8 +121,7 @@ class SmartcarBackend:
     async def _request(self, method: str, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
         last: SmartcarError | None = None
         for attempt in range(self.attempts):
-            headers = {"Authorization": f"Bearer {await self.tokens.bearer(self.client)}",
-                       "sc-unit-system": "metric"}
+            headers = {"Authorization": f"Bearer {await self.tokens.bearer(self.client)}", "sc-unit-system": "metric"}
             try:
                 r = await self.client.request(method, f"{self.api_url}{path}", json=json, headers=headers)
             except httpx.HTTPError as e:
@@ -124,8 +134,11 @@ class SmartcarBackend:
                     err = r.json()
                 except ValueError:
                     err = {}
-                last = SmartcarError(r.status_code, str(err.get("code") or err.get("type") or "ERROR"),
-                                     str(err.get("description") or err.get("message") or r.text[:200]))
+                last = SmartcarError(
+                    r.status_code,
+                    str(err.get("code") or err.get("type") or "ERROR"),
+                    str(err.get("description") or err.get("message") or r.text[:200]),
+                )
                 if r.status_code == 401 and self.tokens.refresh_token:
                     self.tokens.expires_at = 1.0  # force a refresh on the next attempt
                 elif not last.retryable:
@@ -153,10 +166,17 @@ class SmartcarBackend:
             self._request("GET", f"/vehicles/{vid}/odometer"),
             self._request("GET", f"/vehicles/{vid}/location"),
         )
-        v = Vehicle(vin, online=True, plugged_in=False, charging=False, reported_at=now_iso(),
-                    battery_percent=round(float(battery.get("percentRemaining", 0.0)) * 100),
-                    odometer_km=float(odometer.get("distance", 0.0)),
-                    latitude=float(location["latitude"]), longitude=float(location["longitude"]))
+        v = Vehicle(
+            vin,
+            online=True,
+            plugged_in=False,
+            charging=False,
+            reported_at=now_iso(),
+            battery_percent=round(float(battery.get("percentRemaining", 0.0)) * 100),
+            odometer_km=float(odometer.get("distance", 0.0)),
+            latitude=float(location["latitude"]),
+            longitude=float(location["longitude"]),
+        )
         try:
             v.locked = bool((await self._request("GET", f"/vehicles/{vid}/security")).get("isLocked", False))
         except SmartcarError as e:
@@ -186,8 +206,16 @@ class SmartcarBackend:
                 await self._request("POST", f"/vehicles/{self.ids[vin]}/{endpoint}", json={"action": verb})
             except SmartcarError as e:
                 status, reason = "FAILED", f"smartcar {e.code}: {e.message}"
-        await publish_result(self.bus, command_id=command_id, vin=vin, type_=type_, partner_id=partner_id,
-                             trace=trace, status=status, reason=reason)
+        await publish_result(
+            self.bus,
+            command_id=command_id,
+            vin=vin,
+            type_=type_,
+            partner_id=partner_id,
+            trace=trace,
+            status=status,
+            reason=reason,
+        )
 
     async def publish_telemetry(self) -> int:
         return 0  # state is read on demand from Smartcar

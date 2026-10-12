@@ -3,4 +3,4 @@
 from .client import ApiError, PartnerClient
 from .webhooks import InvalidSignature, verify_signature
 
-__all__ = ["PartnerClient", "ApiError", "verify_signature", "InvalidSignature"]
+__all__ = ["ApiError", "InvalidSignature", "PartnerClient", "verify_signature"]

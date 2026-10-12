@@ -21,8 +21,9 @@ and `GcpPubSubBus` for Google Cloud Pub/Sub (or its local emulator).
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Protocol
+from typing import Protocol
 
 
 @dataclass

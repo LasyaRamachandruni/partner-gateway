@@ -24,13 +24,27 @@ class SharedStores:
     idempotency: RedisIdempotencyStore
 
     @classmethod
-    def connect(cls, database_url: str, redis_url: str, *, pool_size: int = 10, prefix: str = "pgw:",
-                idempotency_ttl_s: float = 24 * 3600) -> SharedStores:
+    def connect(
+        cls,
+        database_url: str,
+        redis_url: str,
+        *,
+        pool_size: int = 10,
+        prefix: str = "pgw:",
+        idempotency_ttl_s: float = 24 * 3600,
+    ) -> SharedStores:
         engine = make_engine(database_url, pool_size=pool_size)
         sessions: async_sessionmaker[Any] = async_sessionmaker(engine, expire_on_commit=False)
         redis = Redis.from_url(redis_url, health_check_interval=30, socket_timeout=2.0, socket_connect_timeout=2.0)
-        return cls(engine, redis, SqlPartners(sessions), SqlCommands(sessions), SqlDeliveries(sessions),
-                   RedisRateLimiter(redis, prefix), RedisIdempotencyStore(redis, ttl_s=idempotency_ttl_s, prefix=prefix))
+        return cls(
+            engine,
+            redis,
+            SqlPartners(sessions),
+            SqlCommands(sessions),
+            SqlDeliveries(sessions),
+            RedisRateLimiter(redis, prefix),
+            RedisIdempotencyStore(redis, ttl_s=idempotency_ttl_s, prefix=prefix),
+        )
 
     async def ping(self) -> None:
         await self.redis.ping()

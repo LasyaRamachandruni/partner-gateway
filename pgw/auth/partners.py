@@ -49,15 +49,28 @@ def check_secret(secret: str, stored: str) -> bool:
 
 
 class PartnerRegistry:
-    def __init__(self, repo: PartnerRepository | None = None, *, cache_ttl_s: float = 5.0,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        repo: PartnerRepository | None = None,
+        *,
+        cache_ttl_s: float = 5.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.repo: PartnerRepository = repo or InMemoryPartners()
         self.cache_ttl_s = cache_ttl_s
         self.clock = clock
         self._cache: dict[str, tuple[float, Partner | None]] = {}
 
-    async def register(self, name: str, scopes: set[str], vins: set[str], *, rate_per_s: float = 5.0, burst: int = 10,
-                       webhook_url: str | None = None) -> tuple[Partner, str]:
+    async def register(
+        self,
+        name: str,
+        scopes: set[str],
+        vins: set[str],
+        *,
+        rate_per_s: float = 5.0,
+        burst: int = 10,
+        webhook_url: str | None = None,
+    ) -> tuple[Partner, str]:
         """Create a partner. Returns (partner, client_secret); the secret is shown once and never stored."""
         unknown = scopes - SCOPES
         if unknown:
@@ -66,9 +79,18 @@ class PartnerRegistry:
             raise ValueError("rate_per_s must be positive and burst at least 1")
         client_id = f"pc_{secrets.token_hex(8)}"
         secret = secrets.token_urlsafe(32)
-        p = Partner(f"partner_{secrets.token_hex(4)}", name, client_id, await asyncio.to_thread(hash_secret, secret),
-                    set(scopes), set(vins), rate_per_s, burst, webhook_url,
-                    [f"whsec_{secrets.token_urlsafe(24)}"] if webhook_url else [])
+        p = Partner(
+            f"partner_{secrets.token_hex(4)}",
+            name,
+            client_id,
+            await asyncio.to_thread(hash_secret, secret),
+            set(scopes),
+            set(vins),
+            rate_per_s,
+            burst,
+            webhook_url,
+            [f"whsec_{secrets.token_urlsafe(24)}"] if webhook_url else [],
+        )
         await self.repo.add(p)
         return p, secret
 

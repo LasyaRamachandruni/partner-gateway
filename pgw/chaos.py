@@ -55,22 +55,30 @@ def _config(name: str):
     if name == "retries":
         # breaker that never opens: same code path, breaker effectively disabled
         return dict(resilient=True, retry=retry, breaker=CircuitBreaker("off", min_calls=10**9))
-    return dict(resilient=True, retry=retry,
-                breaker=CircuitBreaker("vehicle-service", failure_threshold=0.5, window=20, min_calls=10,
-                                       open_s=0.5, half_open_trials=3))
+    return dict(
+        resilient=True,
+        retry=retry,
+        breaker=CircuitBreaker(
+            "vehicle-service", failure_threshold=0.5, window=20, min_calls=10, open_s=0.5, half_open_trials=3
+        ),
+    )
 
 
 async def _run(scenario: str, config: str, duration_s: float, workers: int, seed: int) -> dict:
     chaos = Chaos(failure_rate=0.3 if scenario == "flaky" else 0.0, seed=seed)
-    s = await system.build(chaos=chaos, timeout_s=TIMEOUT_S, rate=(10_000, 10_000), webhook_url=None, seed=seed,
-                           **_config(config))
+    s = await system.build(
+        chaos=chaos, timeout_s=TIMEOUT_S, rate=(10_000, 10_000), webhook_url=None, seed=seed, **_config(config)
+    )
     samples: list[Sample] = []
     vins = sorted(s.partner.vins)
     outage_calls = {}
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(s.app), base_url="http://gw") as c:
-            tok = (await c.post("/oauth/token", data={"grant_type": "client_credentials"},
-                                auth=(s.partner.client_id, s.secret))).json()["access_token"]
+            tok = (
+                await c.post(
+                    "/oauth/token", data={"grant_type": "client_credentials"}, auth=(s.partner.client_id, s.secret)
+                )
+            ).json()["access_token"]
             h = {"Authorization": f"Bearer {tok}"}
             start = time.perf_counter()
             calls_before = s.servicer.calls
@@ -108,29 +116,39 @@ def _pct(xs: list[float], p: float) -> float:
     if not xs:
         return float("nan")
     xs = sorted(xs)
-    return xs[min(len(xs) - 1, int(round(p / 100 * (len(xs) - 1))))]
+    return xs[min(len(xs) - 1, round(p / 100 * (len(xs) - 1)))]
 
 
 def _summarize(scenario, config, samples: list[Sample], upstream_calls: int, duration_s: float) -> dict:
     lat = [x.latency_ms for x in samples]
     out = {
-        "scenario": scenario, "config": config, "requests": len(samples),
+        "scenario": scenario,
+        "config": config,
+        "requests": len(samples),
         "success_rate": round(sum(x.ok for x in samples) / len(samples), 4),
-        "p50_ms": round(_pct(lat, 50), 1), "p95_ms": round(_pct(lat, 95), 1), "p99_ms": round(_pct(lat, 99), 1),
+        "p50_ms": round(_pct(lat, 50), 1),
+        "p95_ms": round(_pct(lat, 95), 1),
+        "p99_ms": round(_pct(lat, 99), 1),
         "upstream_calls_per_request": round(upstream_calls / len(samples), 2),
-        "status_counts": {str(k): sum(1 for x in samples if x.status == k) for k in sorted({x.status for x in samples})},
+        "status_counts": {
+            str(k): sum(1 for x in samples if x.status == k) for k in sorted({x.status for x in samples})
+        },
     }
     if scenario == "outage":
         a, b = duration_s / 3, 2 * duration_s / 3
         during = [x for x in samples if a + 0.1 <= x.t < b]
         after = [x for x in samples if x.t >= b]
         first_ok = min((x.t for x in after if x.ok), default=None)
-        out.update({
-            "during_outage_requests": len(during),
-            "during_outage_median_ms": round(statistics.median(x.latency_ms for x in during), 1) if during else None,
-            "recovery_s": round(first_ok - b, 3) if first_ok is not None else None,
-            "after_recovery_success_rate": round(sum(x.ok for x in after) / len(after), 4) if after else None,
-        })
+        out.update(
+            {
+                "during_outage_requests": len(during),
+                "during_outage_median_ms": round(statistics.median(x.latency_ms for x in during), 1)
+                if during
+                else None,
+                "recovery_s": round(first_ok - b, 3) if first_ok is not None else None,
+                "after_recovery_success_rate": round(sum(x.ok for x in after) / len(after), 4) if after else None,
+            }
+        )
     out["timeline"] = [asdict(x) for x in samples]
     return out
 
@@ -156,6 +174,7 @@ async def run_all(duration_s: float = 6.0, workers: int = 20, repeats: int = 3) 
 
 # -- report ---------------------------------------------------------------------------
 
+
 def _f(v, spec: str, suffix: str = "") -> str:
     return "n/a" if v is None else f"{v:{spec}}{suffix}"
 
@@ -163,32 +182,55 @@ def _f(v, spec: str, suffix: str = "") -> str:
 def write_report(results: list[dict], out: str | Path) -> Path:
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "chaos.json").write_text(json.dumps([{k: v for k, v in r.items() if k != "timeline"} for r in results],
-                                               indent=2))
+    (out / "chaos.json").write_text(
+        json.dumps([{k: v for k, v in r.items() if k != "timeline"} for r in results], indent=2)
+    )
     _chart(results, out / "outage_timeline.png")
-    names = {"none": "No retries, no breaker", "retries": "Retries only", "retries+breaker": "Retries + circuit breaker"}
-    lines = ["# Chaos experiment", "",
-             "Generated by `pgw chaos`. Everything runs in one process (real gRPC over mTLS, real gateway), "
-             f"with 20 concurrent partner clients reading vehicle state. Client deadline per call: {TIMEOUT_S * 1000:.0f} ms. "
-             f"Each row is the median of {results[0].get('repeats', 1)} runs.",
-             "", "## Flaky: 30% of vehicle-service calls fail", "",
-             "| Gateway | Success | p50 | p95 | Calls to vehicle service per request |", "|---|---:|---:|---:|---:|"]
+    names = {
+        "none": "No retries, no breaker",
+        "retries": "Retries only",
+        "retries+breaker": "Retries + circuit breaker",
+    }
+    lines = [
+        "# Chaos experiment",
+        "",
+        "Generated by `pgw chaos`. Everything runs in one process (real gRPC over mTLS, real gateway), "
+        "with 20 concurrent partner clients reading vehicle state. "
+        f"Client deadline per call: {TIMEOUT_S * 1000:.0f} ms. "
+        f"Each row is the median of {results[0].get('repeats', 1)} runs.",
+        "",
+        "## Flaky: 30% of vehicle-service calls fail",
+        "",
+        "| Gateway | Success | p50 | p95 | Calls to vehicle service per request |",
+        "|---|---:|---:|---:|---:|",
+    ]
     for r in results:
         if r["scenario"] == "flaky":
-            lines.append(f"| {names[r['config']]} | {r['success_rate']:.1%} | {r['p50_ms']:.1f} ms | {r['p95_ms']:.1f} ms | "
-                         f"{r['upstream_calls_per_request']:.2f} |")
-    lines += ["", "## Outage: the vehicle service hangs for 2 s, then recovers", "",
-              "Clients send their next request as soon as the previous one returns, so slow failures mean fewer "
-              "requests. The comparison uses the outage window itself.", "",
-              "| Gateway | Partner requests while down | Median response while down | Calls sent to the hung service "
-              "| Success in the 2 s after recovery |", "|---|---:|---:|---:|---:|"]
+            lines.append(
+                f"| {names[r['config']]} | {r['success_rate']:.1%} | {r['p50_ms']:.1f} ms | {r['p95_ms']:.1f} ms | "
+                f"{r['upstream_calls_per_request']:.2f} |"
+            )
+    lines += [
+        "",
+        "## Outage: the vehicle service hangs for 2 s, then recovers",
+        "",
+        "Clients send their next request as soon as the previous one returns, so slow failures mean fewer "
+        "requests. The comparison uses the outage window itself.",
+        "",
+        "| Gateway | Partner requests while down | Median response while down | Calls sent to the hung service "
+        "| Success in the 2 s after recovery |",
+        "|---|---:|---:|---:|---:|",
+    ]
     for r in results:
         if r["scenario"] == "outage":
             lo, hi = r.get("after_recovery_success_range") or [r["after_recovery_success_rate"]] * 2
-            spread = f" ({lo:.0%}–{hi:.0%})" if None not in (lo, hi) and hi - lo >= 0.005 else ""
-            lines.append(f"| {names[r['config']]} | {_f(r['during_outage_requests'], '.0f')} | "
-                         f"{_f(r['during_outage_median_ms'], '.1f', ' ms')} | {_f(r.get('during_outage_upstream_calls'), '.0f')} | "
-                         f"{_f(r['after_recovery_success_rate'], '.1%')}{spread} |")
+            spread = f" ({lo:.0%} to {hi:.0%})" if None not in (lo, hi) and hi - lo >= 0.005 else ""
+            lines.append(
+                f"| {names[r['config']]} | {_f(r['during_outage_requests'], '.0f')} | "
+                f"{_f(r['during_outage_median_ms'], '.1f', ' ms')} | "
+                f"{_f(r.get('during_outage_upstream_calls'), '.0f')} | "
+                f"{_f(r['after_recovery_success_rate'], '.1%')}{spread} |"
+            )
     lines += ["", "![Outage timeline](outage_timeline.png)", ""]
     (out / "CHAOS.md").write_text("\n".join(lines))
     return out
@@ -208,10 +250,17 @@ def _chart(results: list[dict], path: Path) -> None:
     fig.patch.set_facecolor(surface)
     ax.set_facecolor(surface)
     fig.subplots_adjust(left=0.09, right=0.97, top=0.74, bottom=0.14)
-    fig.text(0.02, 0.95, "Response time during a vehicle-service outage", fontsize=13, fontweight="bold",
-             color=ink, va="top")
-    fig.text(0.02, 0.885, "Median response time of requests started in each 100 ms; the service hangs from 2 s to 4 s (shaded)",
-             fontsize=9.5, color=muted, va="top")
+    fig.text(
+        0.02, 0.95, "Response time during a vehicle-service outage", fontsize=13, fontweight="bold", color=ink, va="top"
+    )
+    fig.text(
+        0.02,
+        0.885,
+        "Median response time of requests started in each 100 ms; the service hangs from 2 s to 4 s (shaded)",
+        fontsize=9.5,
+        color=muted,
+        va="top",
+    )
     dur = max(x["t"] for r in outage for x in r["timeline"])
     ax.axvspan(dur / 3, 2 * dur / 3, color=grid, alpha=0.6, lw=0)
     for r in outage:
@@ -221,8 +270,7 @@ def _chart(results: list[dict], path: Path) -> None:
         # one point per 100 ms in which requests started; no line across stretches with no new requests
         xs = range(int(dur * 10) + 1)
         ys = [statistics.median(buckets[b]) if b in buckets else float("nan") for b in xs]
-        ax.plot([b / 10 for b in xs], ys, color=colors[r["config"]], lw=2, marker="o", ms=3,
-                label=labels[r["config"]])
+        ax.plot([b / 10 for b in xs], ys, color=colors[r["config"]], lw=2, marker="o", ms=3, label=labels[r["config"]])
     ax.set_yscale("log")
     ax.set_xlabel("seconds", color=muted)
     ax.set_ylabel("ms (log scale)", color=muted)

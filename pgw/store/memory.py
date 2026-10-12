@@ -89,8 +89,11 @@ class InMemoryDeliveries:
 
     async def claim_due(self, now: float, limit: int, lease_s: float) -> list[Delivery]:
         due = sorted(
-            (d for d in self._items.values()
-             if d.status == "pending" and d.next_attempt_at <= now and self._leases.get(d.event_id, 0.0) <= now),
+            (
+                d
+                for d in self._items.values()
+                if d.status == "pending" and d.next_attempt_at <= now and self._leases.get(d.event_id, 0.0) <= now
+            ),
             key=lambda d: d.next_attempt_at,
         )[:limit]
         for d in due:

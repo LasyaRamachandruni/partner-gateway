@@ -43,8 +43,9 @@ class Chaos:
 
 
 class VehicleServicer(rpc.VehicleServiceServicer):
-    def __init__(self, backend: VehicleBackend, chaos: Chaos | None = None,
-                 allowed_clients: set[str] | None = None) -> None:
+    def __init__(
+        self, backend: VehicleBackend, chaos: Chaos | None = None, allowed_clients: set[str] | None = None
+    ) -> None:
         self.backend = backend
         self.chaos = chaos or Chaos()
         self.allowed = allowed_clients
@@ -65,11 +66,13 @@ class VehicleServicer(rpc.VehicleServiceServicer):
     def _trace(context: grpc.aio.ServicerContext) -> dict[str, str]:
         return {k: v for k, v in context.invocation_metadata() if k == "traceparent" or k == "tracestate"}
 
-    async def GetVehicleState(self, request: pb.GetVehicleStateRequest,
-                              context: grpc.aio.ServicerContext) -> pb.VehicleState:
+    async def GetVehicleState(
+        self, request: pb.GetVehicleStateRequest, context: grpc.aio.ServicerContext
+    ) -> pb.VehicleState:
         await self._guard(context)
         with tracing.tracer("vehicle-service").start_as_current_span(
-                "VehicleService/GetVehicleState", context=tracing.extract(self._trace(context))):
+            "VehicleService/GetVehicleState", context=tracing.extract(self._trace(context))
+        ):
             try:
                 v = await self.backend.state(request.vin)
             except Exception as e:
@@ -78,15 +81,24 @@ class VehicleServicer(rpc.VehicleServiceServicer):
             if v is None:
                 await context.abort(grpc.StatusCode.NOT_FOUND, f"unknown vehicle {request.vin}")
                 raise AssertionError("unreachable")  # abort raises
-            return pb.VehicleState(vin=v.vin, online=v.online, locked=v.locked, battery_percent=v.battery_percent,
-                                   odometer_km=v.odometer_km, latitude=v.latitude, longitude=v.longitude,
-                                   reported_at=v.reported_at)
+            return pb.VehicleState(
+                vin=v.vin,
+                online=v.online,
+                locked=v.locked,
+                battery_percent=v.battery_percent,
+                odometer_km=v.odometer_km,
+                latitude=v.latitude,
+                longitude=v.longitude,
+                reported_at=v.reported_at,
+            )
 
-    async def SendCommand(self, request: pb.SendCommandRequest,
-                          context: grpc.aio.ServicerContext) -> pb.SendCommandResponse:
+    async def SendCommand(
+        self, request: pb.SendCommandRequest, context: grpc.aio.ServicerContext
+    ) -> pb.SendCommandResponse:
         await self._guard(context)
         with tracing.tracer("vehicle-service").start_as_current_span(
-                "VehicleService/SendCommand", context=tracing.extract(self._trace(context))):
+            "VehicleService/SendCommand", context=tracing.extract(self._trace(context))
+        ):
             if await self.backend.state(request.vin) is None:
                 await context.abort(grpc.StatusCode.NOT_FOUND, f"unknown vehicle {request.vin}")
             type_ = pb.CommandType.Name(request.type)
@@ -98,9 +110,15 @@ class VehicleServicer(rpc.VehicleServiceServicer):
             return pb.SendCommandResponse(command_id=request.command_id, accepted=True, duplicate=not new)
 
 
-async def serve(backend: VehicleBackend, port: int = 0, *, tls: tuple[bytes, bytes, bytes] | None = None,
-                chaos: Chaos | None = None, allowed_clients: set[str] | None = None,
-                host: str = "127.0.0.1") -> tuple[grpc.aio.Server, int, VehicleServicer]:
+async def serve(
+    backend: VehicleBackend,
+    port: int = 0,
+    *,
+    tls: tuple[bytes, bytes, bytes] | None = None,
+    chaos: Chaos | None = None,
+    allowed_clients: set[str] | None = None,
+    host: str = "127.0.0.1",
+) -> tuple[grpc.aio.Server, int, VehicleServicer]:
     """Start the server. `tls` = (ca_pem, server_cert_pem, server_key_pem) enables mTLS (client certs required)."""
     server = grpc.aio.server()
     servicer = VehicleServicer(backend, chaos, allowed_clients)

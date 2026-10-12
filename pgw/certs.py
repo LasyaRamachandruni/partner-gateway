@@ -43,39 +43,68 @@ def _pem_key(k) -> bytes:
 
 
 def _name(cn: str) -> x509.Name:
-    return x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, "partner-gateway dev CA"),
-                      x509.NameAttribute(NameOID.COMMON_NAME, cn)])
+    return x509.Name(
+        [
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "partner-gateway dev CA"),
+            x509.NameAttribute(NameOID.COMMON_NAME, cn),
+        ]
+    )
 
 
 def make_ca(cn: str = "pgw-internal-ca", days: int = 365) -> tuple[Pair, object, object]:
     key = _key()
-    now = dt.datetime.now(dt.timezone.utc)
-    cert = (x509.CertificateBuilder().subject_name(_name(cn)).issuer_name(_name(cn)).public_key(key.public_key())
-            .serial_number(x509.random_serial_number()).not_valid_before(now - dt.timedelta(minutes=5))
-            .not_valid_after(now + dt.timedelta(days=days))
-            .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
-            .add_extension(x509.KeyUsage(digital_signature=True, key_cert_sign=True, crl_sign=True,
-                                         content_commitment=False, key_encipherment=False, data_encipherment=False,
-                                         key_agreement=False, encipher_only=False, decipher_only=False), critical=True)
-            .sign(key, hashes.SHA256()))
+    now = dt.datetime.now(dt.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(_name(cn))
+        .issuer_name(_name(cn))
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(minutes=5))
+        .not_valid_after(now + dt.timedelta(days=days))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                key_cert_sign=True,
+                crl_sign=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .sign(key, hashes.SHA256())
+    )
     return Pair(cert.public_bytes(serialization.Encoding.PEM), _pem_key(key)), cert, key
 
 
-def issue(ca_cert, ca_key, cn: str, *, server: bool, sans: list[str] = (), days: int = 30) -> Pair:
+def issue(ca_cert, ca_key, cn: str, *, server: bool, sans: tuple[str, ...] = (), days: int = 30) -> Pair:
     key = _key()
-    now = dt.datetime.now(dt.timezone.utc)
-    alt = []
+    now = dt.datetime.now(dt.UTC)
+    alt: list[x509.GeneralName] = []
     for s in sans:
         try:
             alt.append(x509.IPAddress(ipaddress.ip_address(s)))
         except ValueError:
             alt.append(x509.DNSName(s))
-    b = (x509.CertificateBuilder().subject_name(_name(cn)).issuer_name(ca_cert.subject).public_key(key.public_key())
-         .serial_number(x509.random_serial_number()).not_valid_before(now - dt.timedelta(minutes=5))
-         .not_valid_after(now + dt.timedelta(days=days))
-         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH if server
-                                               else ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False))
+    b = (
+        x509.CertificateBuilder()
+        .subject_name(_name(cn))
+        .issuer_name(ca_cert.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(minutes=5))
+        .not_valid_after(now + dt.timedelta(days=days))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH if server else ExtendedKeyUsageOID.CLIENT_AUTH]),
+            critical=False,
+        )
+    )
     if alt:
         b = b.add_extension(x509.SubjectAlternativeName(alt), critical=False)
     cert = b.sign(ca_key, hashes.SHA256())
@@ -91,12 +120,14 @@ class Bundle:
 
 def generate(server_cn: str = "vehicle-service", client_cn: str = "partner-gateway") -> Bundle:
     ca, ca_cert, ca_key = make_ca()
-    server = issue(ca_cert, ca_key, server_cn, server=True, sans=[server_cn, "localhost", "127.0.0.1"])
+    server = issue(ca_cert, ca_key, server_cn, server=True, sans=(server_cn, "localhost", "127.0.0.1"))
     client = issue(ca_cert, ca_key, client_cn, server=False)
     return Bundle(ca, server, client)
 
 
-def write(bundle: Bundle, out: str | Path, server_cn: str = "vehicle-service", client_cn: str = "partner-gateway") -> Path:
+def write(
+    bundle: Bundle, out: str | Path, server_cn: str = "vehicle-service", client_cn: str = "partner-gateway"
+) -> Path:
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     for name, pair in (("ca", bundle.ca), (server_cn, bundle.server), (client_cn, bundle.client)):

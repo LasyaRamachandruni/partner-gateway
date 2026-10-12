@@ -55,35 +55,68 @@ class System:
         await self.webhook_client.aclose()
 
 
-async def build(*, vehicles: int = 10, time_scale: float = 0.01, chaos: Chaos | None = None, resilient: bool = True,
-                bus: Bus | None = None, webhook_url: str | None = "http://partner.test/hooks",
-                webhook_transport: httpx.AsyncBaseTransport | None = None,
-                webhook_backoff_s: tuple[float, ...] = (0.01, 0.02, 0.04), retry: RetryPolicy | None = None,
-                breaker: CircuitBreaker | None = None, timeout_s: float = 1.0, rate: tuple[float, int] = (50.0, 100),
-                command_ttl_s: float = 120.0, start: bool = True, seed: int = 0,
-                host: str = "127.0.0.1", port: int = 0, stores: Stores | None = None,
-                keys: KeyRing | None = None) -> System:
+async def build(
+    *,
+    vehicles: int = 10,
+    time_scale: float = 0.01,
+    chaos: Chaos | None = None,
+    resilient: bool = True,
+    bus: Bus | None = None,
+    webhook_url: str | None = "http://partner.test/hooks",
+    webhook_transport: httpx.AsyncBaseTransport | None = None,
+    webhook_backoff_s: tuple[float, ...] = (0.01, 0.02, 0.04),
+    retry: RetryPolicy | None = None,
+    breaker: CircuitBreaker | None = None,
+    timeout_s: float = 1.0,
+    rate: tuple[float, int] = (50.0, 100),
+    command_ttl_s: float = 120.0,
+    start: bool = True,
+    seed: int = 0,
+    host: str = "127.0.0.1",
+    port: int = 0,
+    stores: Stores | None = None,
+    keys: KeyRing | None = None,
+) -> System:
     bundle = certs.generate()
     bus = bus or InMemoryBus(seed=seed)
     fleet = Fleet(bus, [f"1FTVW1EL{seed:01d}{i:08d}" for i in range(vehicles)], seed=seed, time_scale=time_scale)
-    server, bound, servicer = await serve(fleet, port, host=host, chaos=chaos, allowed_clients={"partner-gateway"},
-                                          tls=(bundle.ca.cert_pem, bundle.server.cert_pem, bundle.server.key_pem))
+    server, bound, servicer = await serve(
+        fleet,
+        port,
+        host=host,
+        chaos=chaos,
+        allowed_clients={"partner-gateway"},
+        tls=(bundle.ca.cert_pem, bundle.server.cert_pem, bundle.server.key_pem),
+    )
     metrics = Metrics()
-    client = VehicleClient(f"{host}:{bound}", tls=(bundle.ca.cert_pem, bundle.client.cert_pem, bundle.client.key_pem),
-                           server_name="vehicle-service", timeout_s=timeout_s, metrics=metrics,
-                           policy=retry or RetryPolicy(attempts=4, base_s=0.02, cap_s=0.2, deadline_s=2.0),
-                           breaker=breaker, resilient=resilient)
+    client = VehicleClient(
+        f"{host}:{bound}",
+        tls=(bundle.ca.cert_pem, bundle.client.cert_pem, bundle.client.key_pem),
+        server_name="vehicle-service",
+        timeout_s=timeout_s,
+        metrics=metrics,
+        policy=retry or RetryPolicy(attempts=4, base_s=0.02, cap_s=0.2, deadline_s=2.0),
+        breaker=breaker,
+        resilient=resilient,
+    )
     stores = stores or InMemoryStores()
     registry = PartnerRegistry(stores.partners)
     vins = list(fleet.vehicles)
-    partner, secret = await registry.register("Demo Insurance Co", {"vehicles:read", "vehicles:command"},
-                                        set(vins[: max(1, len(vins) - 2)]),  # the last two cars aren't shared
-                                        rate_per_s=rate[0], burst=rate[1], webhook_url=webhook_url)
+    partner, secret = await registry.register(
+        "Demo Insurance Co",
+        {"vehicles:read", "vehicles:command"},
+        set(vins[: max(1, len(vins) - 2)]),  # the last two cars aren't shared
+        rate_per_s=rate[0],
+        burst=rate[1],
+        webhook_url=webhook_url,
+    )
     webhook_client = httpx.AsyncClient(transport=webhook_transport)
-    dispatcher = WebhookDispatcher(webhook_client, repo=stores.deliveries, backoff_s=webhook_backoff_s, seed=seed,
-                                   poll_s=0.05)
-    gw = Gateway(registry, client, bus, dispatcher, stores=stores, keys=keys, metrics=metrics,
-                 command_ttl_s=command_ttl_s)
+    dispatcher = WebhookDispatcher(
+        webhook_client, repo=stores.deliveries, backoff_s=webhook_backoff_s, seed=seed, poll_s=0.05
+    )
+    gw = Gateway(
+        registry, client, bus, dispatcher, stores=stores, keys=keys, metrics=metrics, command_ttl_s=command_ttl_s
+    )
     if start:
         await gw.start()
     app = create_app(gw, manage_lifecycle=False)

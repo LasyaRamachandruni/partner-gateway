@@ -16,8 +16,9 @@ import pytest
 
 from partner_sdk import PartnerClient
 
-pytestmark = pytest.mark.skipif(not os.environ.get("PUBSUB_EMULATOR_HOST"),
-                                reason="needs the Pub/Sub emulator (PUBSUB_EMULATOR_HOST)")
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("PUBSUB_EMULATOR_HOST"), reason="needs the Pub/Sub emulator (PUBSUB_EMULATOR_HOST)"
+)
 
 
 async def test_publish_and_subscribe_through_the_emulator():
@@ -46,8 +47,9 @@ async def test_full_system_over_pubsub(receiver):
     bus = GcpPubSubBus(f"pgw-test-{uuid.uuid4().hex[:6]}", create=True)
     s = await system.build(bus=bus, webhook_transport=httpx.ASGITransport(receiver.app))
     try:
-        async with PartnerClient("http://gw.test", s.partner.client_id, s.secret,
-                                 transport=httpx.ASGITransport(s.app)) as pc:
+        async with PartnerClient(
+            "http://gw.test", s.partner.client_id, s.secret, transport=httpx.ASGITransport(s.app)
+        ) as pc:
             vin = sorted(s.partner.vins)[0]
             cmd = await pc.send_command(vin, "LOCK")
             done = await pc.wait_for_command(cmd["command_id"], timeout_s=20, poll_s=0.1)

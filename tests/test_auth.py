@@ -56,12 +56,16 @@ async def test_expired_tampered_and_unsigned_tokens_rejected():
     token, *_ = svc.issue(p)
 
     # expired (PyJWT checks exp against real time, so build one already expired)
-    expired = jwt.encode({"iss": ISSUER, "aud": AUDIENCE, "sub": "p", "iat": 1, "exp": 2},
-                         ring.active.private_pem(), algorithm="ES256", headers={"kid": ring.active.kid})
+    expired = jwt.encode(
+        {"iss": ISSUER, "aud": AUDIENCE, "sub": "p", "iat": 1, "exp": 2},
+        ring.active.private_pem(),
+        algorithm="ES256",
+        headers={"kid": ring.active.kid},
+    )
     with pytest.raises(TokenError, match="expired"):
         svc.verify(expired)
     # tampered payload
-    head, body, sig = token.split(".")
+    head, _body, sig = token.split(".")
     forged = jwt.utils.base64url_encode(b'{"sub":"someone-else"}').decode()
     with pytest.raises(TokenError):
         svc.verify(f"{head}.{forged}.{sig}")
@@ -71,8 +75,12 @@ async def test_expired_tampered_and_unsigned_tokens_rejected():
         svc.verify(none)
     # signed by a key that isn't ours, with our kid
     other = ec.generate_private_key(ec.SECP256R1())
-    fake = jwt.encode({"iss": ISSUER, "aud": AUDIENCE, "sub": "p", "iat": int(clock.t), "exp": int(clock.t) + 60},
-                      other, algorithm="ES256", headers={"kid": ring.active.kid})
+    fake = jwt.encode(
+        {"iss": ISSUER, "aud": AUDIENCE, "sub": "p", "iat": int(clock.t), "exp": int(clock.t) + 60},
+        other,
+        algorithm="ES256",
+        headers={"kid": ring.active.kid},
+    )
     with pytest.raises(TokenError):
         svc.verify(fake)
 

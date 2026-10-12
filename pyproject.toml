@@ -4,28 +4,54 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "partner-gateway"
-version = "0.1.0"
+version = "0.2.0"
 description = "A partner API gateway for connected vehicles: OAuth 2.0, gRPC over mTLS, Pub/Sub events, signed webhooks, resilience patterns and SLOs."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
+# Runtime dependencies are pinned to the versions the test suite runs against.
 dependencies = [
-  "fastapi>=0.110",
-  "python-multipart>=0.0.9",
-  "uvicorn>=0.29",
-  "httpx>=0.27",
-  "grpcio>=1.84",  # stubs in pgw/proto were generated with grpcio-tools 1.84
-  "protobuf>=7.35.1",  # ...which require this protobuf runtime
-  "pyjwt[crypto]>=2.8",
-  "cryptography>=42",
-  "opentelemetry-api>=1.25",
-  "opentelemetry-sdk>=1.25",
-  "prometheus-client>=0.20",
+  "fastapi==0.143.0",
+  "python-multipart==0.0.32",
+  "uvicorn==0.53.0",
+  "httpx==0.28.1",
+  "grpcio==1.84.0",  # stubs in pgw/proto were generated with grpcio-tools 1.84
+  "protobuf==7.36.1",
+  "pyjwt[crypto]==2.14.0",
+  "cryptography==50.0.1",
+  "opentelemetry-api==1.45.1",
+  "opentelemetry-sdk==1.45.1",
+  "prometheus-client==0.26.0",
+  "pydantic==2.13.5",
+  "pydantic-settings==2.15.0",
+  "redis==8.1.0",
+  "sqlalchemy[asyncio]==2.1.4",
+  "asyncpg==0.32.0",
+  "alembic==1.20.0",
 ]
 
 [project.optional-dependencies]
-gcp = ["google-cloud-pubsub>=2.21"]
-otlp = ["opentelemetry-exporter-otlp-proto-http>=1.25"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "grpcio-tools>=1.84", "google-cloud-pubsub>=2.21", "matplotlib>=3.7", "pyyaml>=6"]
+gcp = [
+  "google-cloud-pubsub==2.42.0",
+  "google-cloud-secret-manager==2.31.0",
+  "google-auth==2.61.0",
+]
+otlp = ["opentelemetry-exporter-otlp-proto-http==1.45.1"]
+dev = [
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "pytest-cov==7.1.0",
+  "grpcio-tools==1.84.0",
+  "google-cloud-pubsub==2.42.0",
+  "google-cloud-secret-manager==2.31.0",
+  "google-auth==2.61.0",
+  "matplotlib==3.10.7",
+  "pyyaml==6.0.3",
+  "ruff==0.16.8",
+  "mypy==2.3.1",
+  "pre-commit==4.3.0",
+  "types-protobuf==7.35.1.20260906",
+  "types-PyYAML==6.0.12.20260906",
+]
 
 [project.scripts]
 pgw = "pgw.cli:main"
@@ -33,6 +59,56 @@ pgw = "pgw.cli:main"
 [tool.setuptools.packages.find]
 include = ["pgw*", "partner_sdk*"]
 
+[tool.setuptools.package-data]
+pgw = ["migrations/*.ini", "migrations/*.py", "migrations/*.mako", "migrations/versions/*.py", "py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+  "integration: needs Redis and Postgres (PGW_TEST_REDIS_URL, PGW_TEST_DATABASE_URL)",
+]
+
+[tool.coverage.run]
+source = ["pgw", "partner_sdk"]
+omit = ["pgw/proto/*", "pgw/migrations/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["pgw/proto/vehicle_pb2*.py", "pgw/proto/vehicle_pb2*.pyi"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC", "RUF", "LOG", "G"]
+ignore = [
+  "B008",    # FastAPI's Header(...) defaults
+  "RUF012",  # mutable class attributes on test helpers
+  "SIM105",
+  "ASYNC109",  # test helpers and drain() take a timeout argument on purpose
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "ASYNC110", "RUF006"]
+
+[tool.mypy]
+python_version = "3.12"  # numpy's stubs (via matplotlib) use 3.12 syntax; CI still runs the tests on 3.11
+packages = ["pgw", "partner_sdk"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+exclude = ["pgw/proto/vehicle_pb2_grpc\\.py$"]
+
+[[tool.mypy.overrides]]
+module = ["pgw.store.*", "pgw.settings", "pgw.auth.*", "pgw.resilience.*", "pgw.gateway.*", "pgw.vehicles.*", "pgw.bus.*"]
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["pgw.proto.vehicle_pb2_grpc", "google.cloud.*", "google.auth.*", "google.oauth2.*", "grpc.*", "matplotlib", "matplotlib.*", "numpy", "numpy.*"]
+ignore_missing_imports = true
+follow_imports = "skip"

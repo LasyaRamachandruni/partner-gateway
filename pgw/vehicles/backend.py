@@ -59,11 +59,30 @@ class VehicleBackend(Protocol):
     async def close(self) -> None: ...
 
 
-async def publish_result(bus: Bus, *, command_id: str, vin: str, type_: str, partner_id: str, trace: dict[str, str],
-                         status: str, reason: str | None) -> None:
+async def publish_result(
+    bus: Bus,
+    *,
+    command_id: str,
+    vin: str,
+    type_: str,
+    partner_id: str,
+    trace: dict[str, str],
+    status: str,
+    reason: str | None,
+) -> None:
     with tracing.tracer("vehicle-service").start_as_current_span(
-            "vehicle.command.result", context=tracing.extract(trace),
-            attributes={"vin": vin, "command.status": status}):
-        await bus.publish(RESULTS_TOPIC, {
-            "command_id": command_id, "vin": vin, "type": type_, "partner_id": partner_id,
-            "status": status, "reason": reason, "completed_at": now_iso()}, tracing.inject())
+        "vehicle.command.result", context=tracing.extract(trace), attributes={"vin": vin, "command.status": status}
+    ):
+        await bus.publish(
+            RESULTS_TOPIC,
+            {
+                "command_id": command_id,
+                "vin": vin,
+                "type": type_,
+                "partner_id": partner_id,
+                "status": status,
+                "reason": reason,
+                "completed_at": now_iso(),
+            },
+            tracing.inject(),
+        )

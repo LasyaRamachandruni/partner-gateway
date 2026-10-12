@@ -21,6 +21,7 @@ class Clock:
 
 # rate limiting ----------------------------------------------------------------
 
+
 def test_bucket_allows_burst_then_refills_at_rate():
     clock = Clock()
     rl = InMemoryRateLimiter(clock=clock)
@@ -40,6 +41,7 @@ def test_partners_have_separate_buckets():
 
 
 # retry -----------------------------------------------------------------------
+
 
 def _run(coro):
     return asyncio.run(coro)
@@ -88,7 +90,7 @@ def test_backoff_is_capped_full_jitter():
     rng = random.Random(0)
     for attempt, ceiling in [(1, 0.1), (2, 0.2), (3, 0.4), (4, 0.5), (8, 0.5)]:
         delays = [p.delay(attempt, rng) for _ in range(500)]
-        assert 0 <= min(delays) and max(delays) <= ceiling
+        assert min(delays) >= 0 and max(delays) <= ceiling
         assert max(delays) > 0.8 * ceiling  # jitter actually spreads across the range
 
 
@@ -100,11 +102,18 @@ def test_retry_respects_deadline():
         pass
 
     with pytest.raises(RetriesExhausted):
-        _run(retry(down, RetryPolicy(attempts=50, base_s=10, cap_s=10, deadline_s=1.0),
-                   rng=random.Random(1), sleep=slow_sleep))
+        _run(
+            retry(
+                down,
+                RetryPolicy(attempts=50, base_s=10, cap_s=10, deadline_s=1.0),
+                rng=random.Random(1),
+                sleep=slow_sleep,
+            )
+        )
 
 
 # circuit breaker --------------------------------------------------------------
+
 
 async def _ok():
     return "ok"
@@ -117,8 +126,15 @@ async def _fail():
 def test_breaker_opens_on_failure_rate_and_fails_fast():
     clock = Clock()
     changes = []
-    b = CircuitBreaker("vehicles", failure_threshold=0.5, window=10, min_calls=4, open_s=5, clock=clock,
-                       on_state_change=lambda n, s: changes.append(s))
+    b = CircuitBreaker(
+        "vehicles",
+        failure_threshold=0.5,
+        window=10,
+        min_calls=4,
+        open_s=5,
+        clock=clock,
+        on_state_change=lambda n, s: changes.append(s),
+    )
     for fn in (_ok, _fail, _fail):
         try:
             _run(b.call(fn))
@@ -163,6 +179,7 @@ def test_client_errors_do_not_trip_the_breaker():
 
 
 # idempotency -------------------------------------------------------------------
+
 
 async def test_idempotency_replays_and_rejects_reuse():
     clock = Clock()

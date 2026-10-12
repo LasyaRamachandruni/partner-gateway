@@ -35,11 +35,22 @@ async def stores(request):
 
 
 def _partner(pid: str = "partner_1", client_id: str = "pc_1") -> Partner:
-    return Partner(pid, "Acme", client_id, "scrypt$00$00", {"vehicles:read"}, {"VIN1", "VIN2"}, 2.0, 3,
-                   "https://acme.test/hooks", ["whsec_1"])
+    return Partner(
+        pid,
+        "Acme",
+        client_id,
+        "scrypt$00$00",
+        {"vehicles:read"},
+        {"VIN1", "VIN2"},
+        2.0,
+        3,
+        "https://acme.test/hooks",
+        ["whsec_1"],
+    )
 
 
 # rate limits ---------------------------------------------------------------------
+
 
 async def test_bucket_allows_burst_then_denies_with_retry_after(stores):
     results = [await stores.ratelimits.take("p", rate=2.0, burst=3) for _ in range(4)]
@@ -62,6 +73,7 @@ async def test_concurrent_takes_never_exceed_the_burst(stores):
 
 
 # idempotency ---------------------------------------------------------------------
+
 
 async def test_idempotency_lifecycle(stores):
     idem, body = stores.idempotency, {"vin": "V", "type": "LOCK"}
@@ -91,6 +103,7 @@ async def test_concurrent_begins_let_exactly_one_request_run(stores):
 
 # partners ------------------------------------------------------------------------
 
+
 async def test_partner_round_trip(stores):
     p = _partner()
     await stores.partners.add(p)
@@ -110,11 +123,13 @@ async def test_partner_round_trip(stores):
 
 # commands ------------------------------------------------------------------------
 
+
 async def test_command_completes_once(stores):
     now = time.time()
     await stores.commands.add(Command("cmd_1", "partner_1", "VIN1", "LOCK", "pending", now))
-    results = await asyncio.gather(*(stores.commands.complete("cmd_1", s, None, now + 1)
-                                     for s in ["succeeded", "failed"] * 10))
+    results = await asyncio.gather(
+        *(stores.commands.complete("cmd_1", s, None, now + 1) for s in ["succeeded", "failed"] * 10)
+    )
     applied = [r for r in results if r is not None]
     assert len(applied) == 1
     stored = await stores.commands.get("cmd_1")
@@ -139,9 +154,11 @@ async def test_expire_pending_only_touches_overdue_pending_commands(stores):
 
 # webhook outbox ------------------------------------------------------------------
 
+
 def _delivery(eid: str, at: float, partner: str = "partner_1") -> Delivery:
-    return Delivery(eid, partner, "https://acme.test/hooks", {"id": eid, "type": "ping"}, {}, next_attempt_at=at,
-                    created_at=at)
+    return Delivery(
+        eid, partner, "https://acme.test/hooks", {"id": eid, "type": "ping"}, {}, next_attempt_at=at, created_at=at
+    )
 
 
 async def test_claims_are_leased_to_one_caller(stores):

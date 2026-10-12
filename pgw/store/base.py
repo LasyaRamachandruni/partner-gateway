@@ -89,11 +89,20 @@ class DeliveryRepository(Protocol):
 
 
 class Stores(Protocol):
-    partners: PartnerRepository
-    commands: CommandRepository
-    deliveries: DeliveryRepository
-    ratelimits: RateLimitStore
-    idempotency: IdempotencyStore
+    @property
+    def partners(self) -> PartnerRepository: ...
+
+    @property
+    def commands(self) -> CommandRepository: ...
+
+    @property
+    def deliveries(self) -> DeliveryRepository: ...
+
+    @property
+    def ratelimits(self) -> RateLimitStore: ...
+
+    @property
+    def idempotency(self) -> IdempotencyStore: ...
 
     async def ping(self) -> None:
         """Raise if a backing store is unreachable (used by /readyz)."""

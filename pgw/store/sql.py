@@ -68,8 +68,19 @@ class PartnerRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     def to_record(self) -> Partner:
-        return Partner(self.partner_id, self.name, self.client_id, self.secret_hash, set(self.scopes), set(self.vins),
-                       self.rate_per_s, self.burst, self.webhook_url, list(self.webhook_secrets), self.enabled)
+        return Partner(
+            self.partner_id,
+            self.name,
+            self.client_id,
+            self.secret_hash,
+            set(self.scopes),
+            set(self.vins),
+            self.rate_per_s,
+            self.burst,
+            self.webhook_url,
+            list(self.webhook_secrets),
+            self.enabled,
+        )
 
 
 class CommandRow(Base):
@@ -89,8 +100,16 @@ class CommandRow(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def to_record(self) -> Command:
-        return Command(self.command_id, self.partner_id, self.vin, self.type, self.status,
-                       self.created_at.timestamp(), _epoch(self.completed_at), self.reason)
+        return Command(
+            self.command_id,
+            self.partner_id,
+            self.vin,
+            self.type,
+            self.status,
+            self.created_at.timestamp(),
+            _epoch(self.completed_at),
+            self.reason,
+        )
 
 
 class DeliveryRow(Base):
@@ -114,9 +133,19 @@ class DeliveryRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     def to_record(self) -> Delivery:
-        return Delivery(self.event_id, self.partner_id, self.url, dict(self.event), dict(self.trace), self.attempts,
-                        self.status, self.last_error, self.next_attempt_at.timestamp(), self.created_at.timestamp(),
-                        list(self.history))
+        return Delivery(
+            self.event_id,
+            self.partner_id,
+            self.url,
+            dict(self.event),
+            dict(self.trace),
+            self.attempts,
+            self.status,
+            self.last_error,
+            self.next_attempt_at.timestamp(),
+            self.created_at.timestamp(),
+            list(self.history),
+        )
 
 
 def make_engine(url: str, *, pool_size: int = 10, echo: bool = False) -> AsyncEngine:
@@ -131,10 +160,21 @@ class SqlPartners:
 
     async def add(self, partner: Partner) -> None:
         async with self.sessions.begin() as s:
-            s.add(PartnerRow(partner_id=partner.partner_id, name=partner.name, client_id=partner.client_id,
-                             secret_hash=partner.secret_hash, scopes=sorted(partner.scopes), vins=sorted(partner.vins),
-                             rate_per_s=partner.rate_per_s, burst=partner.burst, webhook_url=partner.webhook_url,
-                             webhook_secrets=list(partner.webhook_secrets), enabled=partner.enabled))
+            s.add(
+                PartnerRow(
+                    partner_id=partner.partner_id,
+                    name=partner.name,
+                    client_id=partner.client_id,
+                    secret_hash=partner.secret_hash,
+                    scopes=sorted(partner.scopes),
+                    vins=sorted(partner.vins),
+                    rate_per_s=partner.rate_per_s,
+                    burst=partner.burst,
+                    webhook_url=partner.webhook_url,
+                    webhook_secrets=list(partner.webhook_secrets),
+                    enabled=partner.enabled,
+                )
+            )
 
     async def by_client_id(self, client_id: str) -> Partner | None:
         async with self.sessions() as s:
@@ -149,11 +189,20 @@ class SqlPartners:
     async def save(self, partner: Partner) -> None:
         async with self.sessions.begin() as s:
             result = await s.execute(
-                update(PartnerRow).where(PartnerRow.partner_id == partner.partner_id).values(
-                    name=partner.name, scopes=sorted(partner.scopes), vins=sorted(partner.vins),
-                    rate_per_s=partner.rate_per_s, burst=partner.burst, webhook_url=partner.webhook_url,
-                    webhook_secrets=list(partner.webhook_secrets), enabled=partner.enabled))
-            if result.rowcount == 0:  # type: ignore[attr-defined]
+                update(PartnerRow)
+                .where(PartnerRow.partner_id == partner.partner_id)
+                .values(
+                    name=partner.name,
+                    scopes=sorted(partner.scopes),
+                    vins=sorted(partner.vins),
+                    rate_per_s=partner.rate_per_s,
+                    burst=partner.burst,
+                    webhook_url=partner.webhook_url,
+                    webhook_secrets=list(partner.webhook_secrets),
+                    enabled=partner.enabled,
+                )
+            )
+            if result.rowcount == 0:
                 raise KeyError(partner.partner_id)
 
 
@@ -163,9 +212,18 @@ class SqlCommands:
 
     async def add(self, command: Command) -> None:
         async with self.sessions.begin() as s:
-            s.add(CommandRow(command_id=command.command_id, partner_id=command.partner_id, vin=command.vin,
-                             type=command.type, status=command.status, created_at=_ts(command.created_at),
-                             completed_at=_ts(command.completed_at), reason=command.reason))
+            s.add(
+                CommandRow(
+                    command_id=command.command_id,
+                    partner_id=command.partner_id,
+                    vin=command.vin,
+                    type=command.type,
+                    status=command.status,
+                    created_at=_ts(command.created_at),
+                    completed_at=_ts(command.completed_at),
+                    reason=command.reason,
+                )
+            )
 
     async def get(self, command_id: str) -> Command | None:
         async with self.sessions() as s:
@@ -180,22 +238,30 @@ class SqlCommands:
         if status not in FINAL_COMMAND_STATES:
             raise ValueError(f"not a final state: {status}")
         async with self.sessions.begin() as s:
-            row = (await s.execute(
-                update(CommandRow)
-                .where(CommandRow.command_id == command_id, CommandRow.status == "pending")
-                .values(status=status, reason=reason, completed_at=_ts(at))
-                .returning(CommandRow)
-            )).scalar_one_or_none()
+            row = (
+                await s.execute(
+                    update(CommandRow)
+                    .where(CommandRow.command_id == command_id, CommandRow.status == "pending")
+                    .values(status=status, reason=reason, completed_at=_ts(at))
+                    .returning(CommandRow)
+                )
+            ).scalar_one_or_none()
             return row.to_record() if row else None
 
     async def expire_pending(self, created_before: float, reason: str, at: float) -> list[Command]:
         async with self.sessions.begin() as s:
-            rows = (await s.execute(
-                update(CommandRow)
-                .where(CommandRow.status == "pending", CommandRow.created_at < _ts(created_before))
-                .values(status="expired", reason=reason, completed_at=_ts(at))
-                .returning(CommandRow)
-            )).scalars().all()
+            rows = (
+                (
+                    await s.execute(
+                        update(CommandRow)
+                        .where(CommandRow.status == "pending", CommandRow.created_at < _ts(created_before))
+                        .values(status="expired", reason=reason, completed_at=_ts(at))
+                        .returning(CommandRow)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             return [r.to_record() for r in rows]
 
 
@@ -205,11 +271,22 @@ class SqlDeliveries:
 
     async def add(self, delivery: Delivery) -> None:
         async with self.sessions.begin() as s:
-            s.add(DeliveryRow(event_id=delivery.event_id, partner_id=delivery.partner_id, url=delivery.url,
-                              event=delivery.event, trace=delivery.trace, attempts=delivery.attempts,
-                              status=delivery.status, last_error=delivery.last_error,
-                              next_attempt_at=_ts(delivery.next_attempt_at), locked_until=None,
-                              history=delivery.history, created_at=_ts(delivery.created_at)))
+            s.add(
+                DeliveryRow(
+                    event_id=delivery.event_id,
+                    partner_id=delivery.partner_id,
+                    url=delivery.url,
+                    event=delivery.event,
+                    trace=delivery.trace,
+                    attempts=delivery.attempts,
+                    status=delivery.status,
+                    last_error=delivery.last_error,
+                    next_attempt_at=_ts(delivery.next_attempt_at),
+                    locked_until=None,
+                    history=delivery.history,
+                    created_at=_ts(delivery.created_at),
+                )
+            )
 
     async def get(self, event_id: str) -> Delivery | None:
         async with self.sessions() as s:
@@ -229,28 +306,45 @@ class SqlDeliveries:
         now_ts = _ts(now)
         due = (
             select(DeliveryRow.event_id)
-            .where(DeliveryRow.status == "pending", DeliveryRow.next_attempt_at <= now_ts,
-                   (DeliveryRow.locked_until.is_(None)) | (DeliveryRow.locked_until <= now_ts))
+            .where(
+                DeliveryRow.status == "pending",
+                DeliveryRow.next_attempt_at <= now_ts,
+                (DeliveryRow.locked_until.is_(None)) | (DeliveryRow.locked_until <= now_ts),
+            )
             .order_by(DeliveryRow.next_attempt_at)
             .limit(limit)
             .with_for_update(skip_locked=True)
             .scalar_subquery()
         )
         async with self.sessions.begin() as s:
-            rows = (await s.execute(
-                update(DeliveryRow)
-                .where(DeliveryRow.event_id.in_(due))
-                .values(locked_until=now_ts + timedelta(seconds=lease_s) if now_ts else None)
-                .returning(DeliveryRow)
-            )).scalars().all()
+            rows = (
+                (
+                    await s.execute(
+                        update(DeliveryRow)
+                        .where(DeliveryRow.event_id.in_(due))
+                        .values(locked_until=now_ts + timedelta(seconds=lease_s) if now_ts else None)
+                        .returning(DeliveryRow)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             return sorted((r.to_record() for r in rows), key=lambda d: d.next_attempt_at)
 
     async def save(self, delivery: Delivery) -> None:
         async with self.sessions.begin() as s:
             await s.execute(
-                update(DeliveryRow).where(DeliveryRow.event_id == delivery.event_id).values(
-                    attempts=delivery.attempts, status=delivery.status, last_error=delivery.last_error,
-                    next_attempt_at=_ts(delivery.next_attempt_at), locked_until=None, history=delivery.history))
+                update(DeliveryRow)
+                .where(DeliveryRow.event_id == delivery.event_id)
+                .values(
+                    attempts=delivery.attempts,
+                    status=delivery.status,
+                    last_error=delivery.last_error,
+                    next_attempt_at=_ts(delivery.next_attempt_at),
+                    locked_until=None,
+                    history=delivery.history,
+                )
+            )
 
     async def count_pending(self) -> int:
         async with self.sessions() as s:

@@ -6,6 +6,7 @@ import asyncio
 import os
 
 from alembic import context
+from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from pgw.store.sql import Base
@@ -26,7 +27,7 @@ def run_offline() -> None:
         context.run_migrations()
 
 
-def _run(connection) -> None:  # type: ignore[no-untyped-def]
+def _run(connection: Connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
     with context.begin_transaction():
         context.run_migrations()

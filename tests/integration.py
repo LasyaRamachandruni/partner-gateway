@@ -18,8 +18,9 @@ from pgw.store.shared import SharedStores
 REDIS_URL = os.environ.get("PGW_TEST_REDIS_URL")
 DATABASE_URL = os.environ.get("PGW_TEST_DATABASE_URL")
 
-needs_infra = pytest.mark.skipif(not (REDIS_URL and DATABASE_URL),
-                                 reason="set PGW_TEST_REDIS_URL and PGW_TEST_DATABASE_URL")
+needs_infra = pytest.mark.skipif(
+    not (REDIS_URL and DATABASE_URL), reason="set PGW_TEST_REDIS_URL and PGW_TEST_DATABASE_URL"
+)
 
 
 def migrate() -> None:

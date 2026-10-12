@@ -62,10 +62,20 @@ def signature_header(body: bytes, secrets: list[str], timestamp: int) -> str:
 
 
 class WebhookDispatcher:
-    def __init__(self, client: httpx.AsyncClient, *, repo: DeliveryRepository | None = None,
-                 backoff_s: tuple[float, ...] = (0.5, 2, 10, 30, 120), timeout_s: float = 5.0,
-                 metrics: Metrics | None = None, seed: int | None = None, poll_s: float = 1.0,
-                 batch: int = 50, lease_s: float = 30.0, concurrency: int = 20) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        repo: DeliveryRepository | None = None,
+        backoff_s: tuple[float, ...] = (0.5, 2, 10, 30, 120),
+        timeout_s: float = 5.0,
+        metrics: Metrics | None = None,
+        seed: int | None = None,
+        poll_s: float = 1.0,
+        batch: int = 50,
+        lease_s: float = 30.0,
+        concurrency: int = 20,
+    ) -> None:
         self.client = client
         self.repo: DeliveryRepository = repo or InMemoryDeliveries()
         self.backoff_s = backoff_s
@@ -96,8 +106,9 @@ class WebhookDispatcher:
         eid = f"evt_{uuid.uuid4().hex[:16]}"
         now = time.time()
         event = {"id": eid, "type": event_type, "created_at": int(now), "data": data}
-        d = Delivery(eid, partner.partner_id, partner.webhook_url, event, tracing.inject(),
-                     next_attempt_at=now, created_at=now)
+        d = Delivery(
+            eid, partner.partner_id, partner.webhook_url, event, tracing.inject(), next_attempt_at=now, created_at=now
+        )
         await self.repo.add(d)
         self._wake.set()
         return d
@@ -143,13 +154,19 @@ class WebhookDispatcher:
         d.attempts += 1
         body = json.dumps(d.event, separators=(",", ":")).encode()
         ts = int(time.time())
-        headers = {"Content-Type": "application/json", "Pgw-Event-Id": d.event_id,
-                   "Pgw-Signature": signature_header(body, partner.webhook_secrets, ts), **d.trace}
+        headers = {
+            "Content-Type": "application/json",
+            "Pgw-Event-Id": d.event_id,
+            "Pgw-Signature": signature_header(body, partner.webhook_secrets, ts),
+            **d.trace,
+        }
         retryable, error = True, None
         try:
             with tracing.tracer("partner-gateway").start_as_current_span(
-                    "webhook.deliver", context=tracing.extract(d.trace),
-                    attributes={"partner": d.partner_id, "attempt": d.attempts}):
+                "webhook.deliver",
+                context=tracing.extract(d.trace),
+                attributes={"partner": d.partner_id, "attempt": d.attempts},
+            ):
                 r = await self.client.post(d.url, content=body, headers=headers, timeout=self.timeout_s)
             if 200 <= r.status_code < 300:
                 d.status = "delivered"
@@ -168,8 +185,9 @@ class WebhookDispatcher:
             d.status = "dead"
             await self.repo.save(d)
             self.metrics.webhooks.labels("dead_lettered").inc()
-            log.warning("webhook dead-lettered",
-                        extra={"event_id": d.event_id, "partner_id": d.partner_id, "error": error})
+            log.warning(
+                "webhook dead-lettered", extra={"event_id": d.event_id, "partner_id": d.partner_id, "error": error}
+            )
             return
         self.metrics.webhooks.labels("retried").inc()
         d.next_attempt_at = time.time() + self.backoff_s[d.attempts - 1] * self.rng.uniform(0.8, 1.2)

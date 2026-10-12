@@ -68,12 +68,20 @@ class SigningKey:
 
     def public_jwk(self) -> dict[str, str]:
         nums = self.private.public_key().public_numbers()
-        return {"kty": "EC", "crv": "P-256", "kid": self.kid, "use": "sig", "alg": "ES256",
-                "x": _b64(nums.x), "y": _b64(nums.y)}
+        return {
+            "kty": "EC",
+            "crv": "P-256",
+            "kid": self.kid,
+            "use": "sig",
+            "alg": "ES256",
+            "x": _b64(nums.x),
+            "y": _b64(nums.y),
+        }
 
     def private_pem(self) -> bytes:
-        return self.private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                          serialization.NoEncryption())
+        return self.private.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+        )
 
 
 def generate_key(status: str = "active", kid: str | None = None, now: float | None = None) -> SigningKey:
@@ -145,8 +153,9 @@ class KeySet:
         out = []
         for k in self.keys:
             status = "active" if k["kid"] == self.active else ("retiring" if k.get("retire_after") else "staged")
-            out.append(SigningKey(k["kid"], _load_private(k["private_pem"], k["kid"]), 0.0, status,
-                                  k.get("retire_after")))
+            out.append(
+                SigningKey(k["kid"], _load_private(k["private_pem"], k["kid"]), 0.0, status, k.get("retire_after"))
+            )
         return out
 
 
@@ -237,7 +246,9 @@ class KeyRing:
         except Exception:
             if not self.keys:
                 raise
-            log.exception("signing key refresh failed; keeping the current keys", extra={"provider": self.provider.name})
+            log.exception(
+                "signing key refresh failed; keeping the current keys", extra={"provider": self.provider.name}
+            )
             return False
         before = (self.active.kid if self.keys else None, {k.kid for k in self.keys})
         self.keys = keys
@@ -266,8 +277,9 @@ class KeyRing:
 
     def prune(self) -> list[str]:
         now = self.clock()
-        gone = [k.kid for k in self.keys if k.status == "retiring" and k.retire_after is not None
-                and k.retire_after <= now]
+        gone = [
+            k.kid for k in self.keys if k.status == "retiring" and k.retire_after is not None and k.retire_after <= now
+        ]
         self.keys = [k for k in self.keys if k.kid not in gone]
         return gone
 

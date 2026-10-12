@@ -71,10 +71,21 @@ class Gateway:
     deliveries, rate-limit buckets and idempotency keys are all in `stores`, and
     the signing keys come from the key ring's provider."""
 
-    def __init__(self, partners: PartnerRegistry, vehicles: VehicleClient, bus: Bus, webhooks: WebhookDispatcher,
-                 *, stores: Stores | None = None, keys: KeyRing | None = None, metrics: Metrics | None = None,
-                 command_ttl_s: float = 120.0, token_rate: tuple[float, int] = (1.0, 10),
-                 keys_refresh_s: float = 60.0, sweep_every_s: float = 5.0):
+    def __init__(
+        self,
+        partners: PartnerRegistry,
+        vehicles: VehicleClient,
+        bus: Bus,
+        webhooks: WebhookDispatcher,
+        *,
+        stores: Stores | None = None,
+        keys: KeyRing | None = None,
+        metrics: Metrics | None = None,
+        command_ttl_s: float = 120.0,
+        token_rate: tuple[float, int] = (1.0, 10),
+        keys_refresh_s: float = 60.0,
+        sweep_every_s: float = 5.0,
+    ):
         self.stores: Stores = stores or InMemoryStores()
         self.partners = partners
         self.vehicles = vehicles
@@ -118,11 +129,12 @@ class Gateway:
         await self.webhooks.stop()
 
 
-def _err(status: int, code: str, message: str, request: Request,
-         headers: dict[str, str] | None = None) -> JSONResponse:
-    return JSONResponse({"error": {"code": code, "message": message,
-                                   "request_id": getattr(request.state, "request_id", None)}},
-                        status_code=status, headers=headers)
+def _err(status: int, code: str, message: str, request: Request, headers: dict[str, str] | None = None) -> JSONResponse:
+    return JSONResponse(
+        {"error": {"code": code, "message": message, "request_id": getattr(request.state, "request_id", None)}},
+        status_code=status,
+        headers=headers,
+    )
 
 
 def create_app(gw: Gateway, manage_lifecycle: bool = True) -> FastAPI:
@@ -145,8 +157,11 @@ def create_app(gw: Gateway, manage_lifecycle: bool = True) -> FastAPI:
     @app.exception_handler(Exception)
     async def _unexpected(request: Request, exc: Exception) -> JSONResponse:
         # A store or bug failure: log it with the request id, answer in the common error shape.
-        log.exception("unhandled error", extra={"request_id": getattr(request.state, "request_id", None),
-                                                "path": request.url.path})
+        log.error(
+            "unhandled error",
+            exc_info=exc,
+            extra={"request_id": getattr(request.state, "request_id", None), "path": request.url.path},
+        )
         return _err(500, "internal_error", "internal error", request)
 
     @app.middleware("http")
@@ -180,19 +195,23 @@ def create_app(gw: Gateway, manage_lifecycle: bool = True) -> FastAPI:
         try:
             claims = gw.tokens.verify(auth[7:].strip())
         except TokenError as e:
-            raise ApiError(401, "invalid_token", str(e),
-                           {"WWW-Authenticate": 'Bearer error="invalid_token"'}) from e
+            raise ApiError(401, "invalid_token", str(e), {"WWW-Authenticate": 'Bearer error="invalid_token"'}) from e
         partner = await gw.partners.by_id(claims.partner_id)
         if partner is None or not partner.enabled:
             raise ApiError(401, "invalid_token", "partner is disabled")
         decision = await gw.ratelimits.take(f"partner:{partner.partner_id}", partner.rate_per_s, partner.burst)
-        request.state.rate_headers = {"X-RateLimit-Limit": str(decision.limit),
-                                      "X-RateLimit-Remaining": str(decision.remaining)}
+        request.state.rate_headers = {
+            "X-RateLimit-Limit": str(decision.limit),
+            "X-RateLimit-Remaining": str(decision.remaining),
+        }
         if not decision.allowed:
             gw.metrics.rate_limited.labels(partner.partner_id).inc()
-            raise ApiError(429, "rate_limited", "too many requests",
-                           {"Retry-After": str(max(1, round(decision.retry_after_s + 0.499))),
-                            **request.state.rate_headers})
+            raise ApiError(
+                429,
+                "rate_limited",
+                "too many requests",
+                {"Retry-After": str(max(1, round(decision.retry_after_s + 0.499))), **request.state.rate_headers},
+            )
         if scope and scope not in claims.scopes:
             raise ApiError(403, "insufficient_scope", f"this token lacks the '{scope}' scope")
         return partner
@@ -202,8 +221,12 @@ def create_app(gw: Gateway, manage_lifecycle: bool = True) -> FastAPI:
             raise ApiError(404, "not_found", f"no vehicle {vin} for this partner")
 
     def unavailable(e: UpstreamUnavailable) -> ApiError:
-        return ApiError(503, "upstream_unavailable", "the vehicle service is temporarily unavailable",
-                        {"Retry-After": str(max(1, round(e.retry_after_s + 0.499)))})
+        return ApiError(
+            503,
+            "upstream_unavailable",
+            "the vehicle service is temporarily unavailable",
+            {"Retry-After": str(max(1, round(e.retry_after_s + 0.499)))},
+        )
 
     # -- OAuth ---------------------------------------------------------------------
     @app.post("/oauth/token")
@@ -230,8 +253,10 @@ def create_app(gw: Gateway, manage_lifecycle: bool = True) -> FastAPI:
             access, ttl, scopes = gw.tokens.issue(partner, requested)
         except TokenError:
             return JSONResponse({"error": "invalid_scope"}, 400)
-        return JSONResponse({"access_token": access, "token_type": "Bearer", "expires_in": ttl,
-                             "scope": " ".join(sorted(scopes))}, headers={"Cache-Control": "no-store"})
+        return JSONResponse(
+            {"access_token": access, "token_type": "Bearer", "expires_in": ttl, "scope": " ".join(sorted(scopes))},
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/.well-known/jwks.json")
     async def jwks() -> JSONResponse:
@@ -253,14 +278,23 @@ def create_app(gw: Gateway, manage_lifecycle: bool = True) -> FastAPI:
             raise ApiError(404, "not_found", f"no vehicle {vin} for this partner") from e
         except UpstreamUnavailable as e:
             raise unavailable(e) from e
-        return JSONResponse({"vin": s.vin, "online": s.online, "locked": s.locked,
-                             "battery_percent": s.battery_percent, "odometer_km": s.odometer_km,
-                             "location": {"latitude": s.latitude, "longitude": s.longitude},
-                             "reported_at": s.reported_at}, headers=request.state.rate_headers)
+        return JSONResponse(
+            {
+                "vin": s.vin,
+                "online": s.online,
+                "locked": s.locked,
+                "battery_percent": s.battery_percent,
+                "odometer_km": s.odometer_km,
+                "location": {"latitude": s.latitude, "longitude": s.longitude},
+                "reported_at": s.reported_at,
+            },
+            headers=request.state.rate_headers,
+        )
 
     @app.post("/v1/vehicles/{vin}/commands", status_code=202)
-    async def send_command(vin: str, body: CommandRequest, request: Request,
-                           idempotency_key: str | None = Header(None)) -> JSONResponse:
+    async def send_command(
+        vin: str, body: CommandRequest, request: Request, idempotency_key: str | None = Header(None)
+    ) -> JSONResponse:
         p = await authenticate(request, "vehicles:command")
         granted(p, vin)
         if body.type not in COMMANDS:
@@ -295,8 +329,9 @@ def create_app(gw: Gateway, manage_lifecycle: bool = True) -> FastAPI:
         result = {**cmd.public(), "links": {"self": f"/v1/commands/{cmd.command_id}"}}
         if idempotency_key:
             await gw.idempotency.finish(p.partner_id, idempotency_key, payload, 202, result)
-        return JSONResponse(result, 202, headers={**request.state.rate_headers,
-                                                  "Location": f"/v1/commands/{cmd.command_id}"})
+        return JSONResponse(
+            result, 202, headers={**request.state.rate_headers, "Location": f"/v1/commands/{cmd.command_id}"}
+        )
 
     @app.get("/v1/commands/{command_id}")
     async def command_status(command_id: str, request: Request) -> JSONResponse:
@@ -319,8 +354,18 @@ def create_app(gw: Gateway, manage_lifecycle: bool = True) -> FastAPI:
     async def deliveries(request: Request, status: str | None = None) -> dict[str, Any]:
         p = await authenticate(request)
         items = await gw.webhooks.repo.list_for_partner(p.partner_id, status, limit=100)
-        return {"deliveries": [{"event_id": d.event_id, "type": d.event["type"], "status": d.status,
-                                "attempts": d.attempts, "last_error": d.last_error} for d in items]}
+        return {
+            "deliveries": [
+                {
+                    "event_id": d.event_id,
+                    "type": d.event["type"],
+                    "status": d.status,
+                    "attempts": d.attempts,
+                    "last_error": d.last_error,
+                }
+                for d in items
+            ]
+        }
 
     @app.post("/v1/webhooks/deliveries/{event_id}/replay")
     async def replay(event_id: str, request: Request) -> JSONResponse:
@@ -350,8 +395,14 @@ def create_app(gw: Gateway, manage_lifecycle: bool = True) -> FastAPI:
             log.warning("readiness: a store is unreachable", exc_info=True)
             stores_ok = False
         ready = gw.ready and stores_ok
-        return JSONResponse({"ready": ready, "stores": "ok" if stores_ok else "unreachable",
-                             "vehicle_service_circuit": gw.vehicles.breaker.state.value}, 200 if ready else 503)
+        return JSONResponse(
+            {
+                "ready": ready,
+                "stores": "ok" if stores_ok else "unreachable",
+                "vehicle_service_circuit": gw.vehicles.breaker.state.value,
+            },
+            200 if ready else 503,
+        )
 
     @app.get("/metrics")
     async def metrics() -> Response:

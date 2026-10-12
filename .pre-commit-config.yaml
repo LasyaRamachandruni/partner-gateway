@@ -1,0 +1,27 @@
+# pip install -e ".[dev]" && pre-commit install
+# Hooks run the versions pinned in pyproject.toml, from the active environment.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format
+        language: system
+        types: [python]
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: terraform-fmt
+        name: terraform fmt
+        entry: terraform fmt -recursive deploy/terraform
+        language: system
+        files: \.tf$
+        pass_filenames: false

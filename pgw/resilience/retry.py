@@ -16,8 +16,9 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable, TypeVar
+from typing import TypeVar
 
 T = TypeVar("T")
 
@@ -41,17 +42,20 @@ class RetriesExhausted(Exception):
         self.last = last
 
 
-async def retry(call: Callable[[], Awaitable[T]], policy: RetryPolicy = RetryPolicy(),
-                retryable: Callable[[BaseException], bool] = lambda e: True,
-                rng: random.Random | None = None,
-                sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-                on_retry: Callable[[int, BaseException], None] | None = None) -> T:
+async def retry(
+    call: Callable[[], Awaitable[T]],
+    policy: RetryPolicy = RetryPolicy(),
+    retryable: Callable[[BaseException], bool] = lambda e: True,
+    rng: random.Random | None = None,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    on_retry: Callable[[int, BaseException], None] | None = None,
+) -> T:
     rng = rng or random.Random()
     start = time.monotonic()
     for attempt in range(1, policy.attempts + 1):
         try:
             return await call()
-        except Exception as exc:  # noqa: BLE001 - decided by `retryable`
+        except Exception as exc:
             if not retryable(exc) or attempt == policy.attempts:
                 if attempt > 1:
                     raise RetriesExhausted(attempt, exc) from exc
