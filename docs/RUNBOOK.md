@@ -84,12 +84,17 @@ A partner's endpoint is rejecting or failing our deliveries.
 
 ### Rotate token signing keys
 
-1. `KeyRing.stage()` publishes the next key in the JWKS.
-2. Wait at least the JWKS cache time (5 minutes) so verifiers have the key.
-3. `KeyRing.rotate()` starts signing with the new key. The old key keeps verifying until
-   its tokens expire (15 minutes + 1 minute of leeway), then it's pruned.
+The key set lives in Secret Manager (`pgw-token-signing-key-<env>`); every replica re-reads it
+every minute.
 
-No partner action is needed; existing tokens keep working.
+1. `make keys-stage PROJECT=...` adds the next key. It is published in the JWKS but not used.
+2. Wait at least 6 minutes: 1 minute for replicas to reload, 5 for the JWKS cache.
+3. `make keys-activate PROJECT=...` signs with the new key. The old key keeps verifying until
+   its tokens expire (15 minutes + 1 minute of leeway).
+4. After 16 minutes, `make keys-prune PROJECT=...` removes the old key.
+
+No partner action is needed; existing tokens keep working. Locally the same steps are
+`pgw keys stage|activate|prune keyset.json`.
 
 ### Rotate a partner's webhook secret
 
@@ -100,7 +105,29 @@ No partner action is needed; existing tokens keep working.
 
 ### Onboard a partner
 
-1. `PartnerRegistry.register(name, scopes, vins, webhook_url=...)` returns the client
-   secret **once**. Send it through a secure channel; only its hash is stored.
+1. `pgw partners create --name ... --vin ... --webhook-url ...` (in GCP: the `pgw-admin-<env>`
+   job with `--args=partners,create,...`) prints the client secret **once**. Send it through a
+   secure channel; only its hash is stored.
 2. Grant only the scopes they need. Read-only integrations don't get `vehicles:command`.
 3. Point them at the sandbox (`pgw sandbox`) and the SDK.
+
+### Redis (Memorystore) is down
+
+Every authenticated request checks a rate-limit bucket in Redis, so the API answers 500
+and `/readyz` reports `"stores": "unreachable"`. Token issuance also stops (it is rate
+limited per client id). Commands already accepted keep completing: results, command state
+and webhooks are in Postgres.
+
+1. Check the instance: `gcloud redis instances describe pgw-<env> --region <region>`.
+2. A Basic-tier instance restarts empty. Nothing else is needed: buckets refill and
+   idempotency keys start over.
+
+### Postgres (Cloud SQL) is down
+
+Token issuance, command creation and command status fail; reads of vehicle state keep
+working for about 5 seconds per partner (the partner cache), then fail too. Results that
+arrive meanwhile stay in the Pub/Sub subscription and are applied when the database is back.
+
+1. `gcloud sql instances describe pgw-<env>`; check the connection count against the
+   tier's limit (each gateway instance opens up to `PGW_DB_POOL_SIZE` x 2).
+2. Webhook deliveries resume on their own: the outbox is in the database.

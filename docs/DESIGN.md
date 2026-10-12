@@ -77,14 +77,75 @@ and halved the calls hitting the broken service.
 - **One trace per command,** from the partner's request through gRPC and Pub/Sub to
   the webhook. When a partner says "my unlock never arrived," one trace id answers where it stopped.
 
+## State lives outside the process, so replicas are interchangeable
+
+Every piece of state a request depends on sits behind an interface in `pgw/store`, with an
+in-memory implementation for tests and the sandbox and a shared one for deployment:
+
+| State | Shared store | Why there |
+|---|---|---|
+| Rate-limit token buckets | Redis, one Lua script per decision | Checked on every request: needs to be fast, and a lost bucket only resets a limit |
+| Idempotency keys | Redis, Lua for "claim the key or report what holds it" | Short-lived (24 h TTL), checked on every command |
+| Partners | Postgres | Durable, audited records; read through a 5-second cache per replica |
+| Commands | Postgres | Partners poll them; the state machine must survive restarts |
+| Webhook deliveries | Postgres (an outbox) | A delivery must not be lost when a replica dies |
+
+The guarantees that used to come from "one process" now come from single atomic operations
+in the store, and `tests/test_multi_replica.py` checks them with two real replicas:
+
+- **Rate limits:** the token bucket is one Lua script, so a partner gets its burst once,
+  not once per replica. The control test shows two in-memory replicas letting 2x through.
+- **Idempotency:** claiming a key is one Lua script. Of concurrent requests with the same key
+  on different replicas, exactly one runs; the rest get 409 and later replay its response.
+  An in-progress claim holds the key for a 30-second lease only, so a replica that dies
+  mid-request doesn't block the key for a day.
+- **Command results:** `UPDATE ... WHERE status = 'pending' RETURNING`. Two replicas that
+  both receive a result (redelivery, or one per replica after a rebalance) can't both apply it,
+  and only the one that did sends the webhook.
+- **Webhooks:** replicas claim due deliveries with `FOR UPDATE SKIP LOCKED` and a lease.
+  A replica that dies mid-attempt loses nothing; the lease runs out and another picks it up.
+
+Redis holds nothing that can't be lost: if Memorystore restarts, buckets refill and
+in-flight idempotency keys are forgotten (a retry after that could create a second
+command; the vehicle service still deduplicates by command id).
+
+## Signing keys come from a key set, not from the process
+
+A replica that generated its own key would sign tokens no other replica can verify. Keys
+are a key set (JSON: the active kid plus every key still allowed to verify) loaded by a
+`KeyProvider`: an environment variable or file locally, Google Secret Manager in the cloud.
+Every replica reloads it every minute and keeps its current keys if a reload fails.
+Rotation is three edits of the key set (stage, activate, prune), each a new secret version;
+see the runbook.
+
+KMS asymmetric signing (the private key never leaves KMS) would be the next step. It costs
+a KMS call per token, which is fine at token-issuance rates; Secret Manager keeps the
+code simpler for now.
+
+## Cloud Run replaces mTLS between the services with IAM
+
+Cloud Run terminates TLS at its front end and can't forward a client certificate, so the
+mTLS hop can't survive there. On Cloud Run the vehicle service listens in plaintext HTTP/2
+behind the platform, accepts only callers with `roles/run.invoker` (the gateway's service
+account), and the gateway attaches a Google-signed ID token to each call. mTLS stays the
+default everywhere else (docker compose, VMs, GKE), and the same code supports both
+(`PGW_VEHICLE_AUTH`, `PGW_GRPC_TLS`).
+
+## Vehicles: simulated, or Smartcar
+
+The vehicle service talks to "the cars" through a `VehicleBackend`. The simulated fleet
+is the default. `PGW_VEHICLE_BACKEND=smartcar` uses the Smartcar API, which also serves
+Smartcar's Vehicle Simulator, so the same gateway can drive simulated cars that a third
+party hosts. Smartcar commands are synchronous HTTP calls; the backend runs them in the
+background and publishes the result like the fleet does, so the gateway can't tell the
+backends apart. It reports Smartcar errors as UNAVAILABLE rather than inventing values
+for a car it couldn't read.
+
 ## What a production version would add
 
-- **Shared state:** rate limits, idempotency keys and command state in a shared
-  store (Redis or a database), so the gateway can run several replicas.
-- **Partners and grants in a database,** with an admin API and an audit log.
-- **Key storage:** signing keys and mTLS certificates from Secret Manager and a managed
-  CA, with automatic rotation. The Terraform declares the secrets.
-- **A compute target** (GKE, or Cloud Run where mTLS terminates at a mesh). The
-  Terraform covers messaging, identity and secrets, not compute.
+- **An admin API** for partners and grants, with an audit log (today: `pgw partners create`).
+- **KMS-backed token signing** and a managed CA for the non-Cloud Run mTLS path.
 - **Per-partner quotas on commands** and an approval step for sensitive commands
   like unlocking.
+- **Redis with a replica** (Memorystore Standard tier) if losing idempotency keys on a
+  Redis restart is not acceptable.
