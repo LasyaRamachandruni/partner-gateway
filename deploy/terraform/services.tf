@@ -85,6 +85,12 @@ resource "google_sql_database_instance" "main" {
       enabled = true
     }
 
+    # db-f1-micro defaults to 25 connections; each gateway instance holds up to 2 x PGW_DB_POOL_SIZE.
+    database_flags {
+      name  = "max_connections"
+      value = tostring(var.db_max_connections)
+    }
+
     # No authorized networks: the only way in is the Cloud SQL connector, which checks IAM.
     ip_configuration {
       ipv4_enabled = true
@@ -345,7 +351,7 @@ resource "google_cloud_run_v2_service" "gateway" {
       }
       env {
         name  = "PGW_DB_POOL_SIZE"
-        value = "5"
+        value = "2" # x2 with overflow, x gateway_max_instances: stays under db_max_connections
       }
       env {
         name = "PGW_DATABASE_URL"

@@ -45,6 +45,12 @@ variable "db_tier" {
   default     = "db-f1-micro"
 }
 
+variable "db_max_connections" {
+  description = "Postgres max_connections (gateway instances x 4 + the admin job must fit)"
+  type        = number
+  default     = 60
+}
+
 variable "redis_memory_gb" {
   description = "Memorystore size (Basic tier, no replica)"
   type        = number
