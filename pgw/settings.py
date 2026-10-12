@@ -77,8 +77,6 @@ class Settings(BaseSettings):
         key_sources = [self.signing_keys, self.signing_keys_file, self.signing_keys_secret]
         if sum(s is not None for s in key_sources) > 1:
             raise ValueError("set only one of PGW_SIGNING_KEYS, PGW_SIGNING_KEYS_FILE, PGW_SIGNING_KEYS_SECRET")
-        if self.env != "local" and not any(s is not None for s in key_sources):
-            raise ValueError(f"PGW_ENV={self.env}: a signing key source is required (generated keys are local-only)")
         if self.env != "local" and (self.database_url is None) != (self.redis_url is None):
             raise ValueError("set both PGW_DATABASE_URL and PGW_REDIS_URL, or neither")
         if self.vehicle_backend == "smartcar" and not (self.smartcar_access_token or self.smartcar_refresh_token):

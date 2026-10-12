@@ -217,17 +217,24 @@ def cmd_db(args: argparse.Namespace) -> int:
 
 
 def cmd_partners_create(args: argparse.Namespace) -> int:
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
     from .auth.partners import PartnerRegistry
-    from .runtime import demo_vins, open_stores
+    from .runtime import demo_vins
+    from .store.sql import SqlPartners, make_engine
 
     settings = _settings()
     _setup_obs("pgw-admin", settings)
+    if settings.database_url is None:
+        log.error("PGW_DATABASE_URL is not set: partners are stored in Postgres")
+        return 2
     vins = set(args.vin or []) | (set(demo_vins(args.demo_vins)) if args.demo_vins else set())
 
     async def main() -> dict[str, Any]:
-        stores = open_stores(settings)
+        engine = make_engine(settings.database_url.get_secret_value(), pool_size=1)
         try:
-            p, secret = await PartnerRegistry(stores.partners).register(
+            repo = SqlPartners(async_sessionmaker(engine, expire_on_commit=False))
+            p, secret = await PartnerRegistry(repo).register(
                 args.name,
                 set(args.scopes.split(",")),
                 vins,
@@ -236,7 +243,7 @@ def cmd_partners_create(args: argparse.Namespace) -> int:
                 webhook_url=args.webhook_url,
             )
         finally:
-            await stores.close()
+            await engine.dispose()
         return {
             "partner_id": p.partner_id,
             "client_id": p.client_id,

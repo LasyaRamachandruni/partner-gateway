@@ -118,6 +118,8 @@ async def build_gateway(
     stores = stores or open_stores(s)
     bus = bus or open_bus(s, stores)
     provider = key_provider(s)
+    if provider is None and s.env != "local":
+        raise ValueError(f"PGW_ENV={s.env}: set a signing key source (generated keys are for local use only)")
     keys = (
         await KeyRing.from_provider(provider, token_ttl_s=s.token_ttl_s)
         if provider

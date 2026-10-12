@@ -200,3 +200,27 @@ async def test_list_for_partner(stores):
 
 async def test_ping(stores):
     await stores.ping()
+
+
+@needs_infra
+@pytest.mark.integration
+def test_admin_commands_migrate_and_register_a_partner(_schema, monkeypatch, capsys):
+    import json
+
+    from pgw.cli import main
+
+    from .integration import DATABASE_URL
+
+    monkeypatch.setenv("PGW_DATABASE_URL", DATABASE_URL)
+    monkeypatch.setenv("PGW_LOG_FORMAT", "text")
+    assert main(["db", "upgrade"]) == 0
+    assert main(["partners", "create", "--name", "CLI Co", "--demo-vins", "3", "--rate", "50", "--burst", "100"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["client_id"].startswith("pc_") and out["vins"] == 3 and out["client_secret"]
+
+
+def test_partners_create_needs_a_database(monkeypatch):
+    from pgw.cli import main
+
+    monkeypatch.delenv("PGW_DATABASE_URL", raising=False)
+    assert main(["partners", "create", "--name", "x"]) == 2

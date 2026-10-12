@@ -1,4 +1,4 @@
-"""Structured logging: one JSON object per line, with the trace id when there is one.
+"""Structured logging: one JSON object per line on stderr, with the trace id when there is one.
 
 Cloud Logging parses `severity` and `message` from JSON lines and links entries to
 Cloud Trace through `logging.googleapis.com/trace`. Fields passed with
@@ -47,7 +47,7 @@ class JsonFormatter(logging.Formatter):
 
 
 def setup(service: str, level: str = "INFO", fmt: str = "json") -> None:
-    handler = logging.StreamHandler(sys.stdout)
+    handler = logging.StreamHandler(sys.stderr)  # stdout is for command output (credentials, key ids)
     if fmt == "json":
         handler.setFormatter(JsonFormatter(service))
     else:

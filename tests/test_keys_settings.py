@@ -123,8 +123,6 @@ def test_settings_from_environment(monkeypatch):
 
 
 def test_settings_refuse_unsafe_combinations(tmp_path):
-    with pytest.raises(ValidationError, match="signing key source is required"):
-        Settings(env="prod")
     with pytest.raises(ValidationError, match="only one of"):
         Settings(signing_keys="{}", signing_keys_file=tmp_path)
     with pytest.raises(ValidationError, match="both PGW_DATABASE_URL and PGW_REDIS_URL"):
@@ -151,6 +149,11 @@ def test_keys_command_rotation(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["pruned"] == []  # old key still within its tokens' lifetime
 
 
+async def test_a_deployed_gateway_refuses_to_generate_its_own_keys():
+    with pytest.raises(ValueError, match="signing key source"):
+        await build_gateway(Settings(env="prod", vehicle_auth="insecure"))
+
+
 async def test_build_gateway_from_settings_with_in_memory_stores():
     rt = await build_gateway(Settings(vehicle_auth="insecure", vehicle_service="127.0.0.1:1"))
     try:
@@ -158,3 +161,20 @@ async def test_build_gateway_from_settings_with_in_memory_stores():
         assert rt.gateway.stores is rt.stores
     finally:
         await rt.close()
+
+
+def test_json_logs_carry_extra_fields_and_the_trace_id(capsys):
+    import logging
+
+    from pgw.obs import logging as obs_logging
+    from pgw.obs import tracing
+
+    obs_logging.setup("test-service", "INFO", "json")
+    try:
+        with tracing.tracer("t").start_as_current_span("work"):
+            logging.getLogger("pgw.test").info("command applied", extra={"command_id": "cmd_1"})
+        line = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
+    finally:
+        logging.getLogger().handlers.clear()
+    assert line["message"] == "command applied" and line["command_id"] == "cmd_1"
+    assert line["severity"] == "INFO" and line["service"] == "test-service" and len(line["trace_id"]) == 32
