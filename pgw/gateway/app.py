@@ -29,19 +29,19 @@ import contextlib
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..auth.keys import KeyRing
 from ..auth.partners import Partner, PartnerRegistry
 from ..auth.tokens import TokenError, TokenService
 from ..bus.base import Bus
-from ..obs import tracing
 from ..obs.metrics import Metrics
 from ..resilience.idempotency import InProgress, KeyReused
 from ..store.base import Stores
@@ -129,6 +129,47 @@ class Gateway:
         await self.webhooks.stop()
 
 
+class ObserveMiddleware:
+    """Request id and the SLO metrics for every request.
+
+    The server span itself comes from FastAPI's built-in OpenTelemetry support (one SERVER span per
+    request, parented on the incoming `traceparent`), so this middleware doesn't start another.
+    It is a plain ASGI middleware rather than `@app.middleware("http")`: Starlette's
+    BaseHTTPMiddleware wraps every response in an extra task and stream, which the load test showed
+    as a large share of per-request CPU."""
+
+    def __init__(self, app: ASGIApp, gw: Gateway) -> None:
+        self.app = app
+        self.gw = gw
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request_id = next((v.decode("latin-1") for k, v in scope["headers"] if k == b"x-request-id"), None)
+        request_id = request_id or uuid.uuid4().hex
+        scope.setdefault("state", {})["request_id"] = request_id
+        method: str = scope["method"]
+        status = 500
+        t0 = time.perf_counter()
+
+        async def send_with_id(message: Message) -> None:
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+                message["headers"] = [*message.get("headers", []), (b"x-request-id", request_id.encode("latin-1"))]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_id)
+        finally:
+            # label by route template (/v1/vehicles/{vin}), never the raw path, so VINs don't explode
+            # cardinality. An exception counts as a 500 before the error handler answers it.
+            path = getattr(scope.get("route"), "path", "unmatched")
+            self.gw.metrics.requests.labels(path, method, str(status)).inc()
+            self.gw.metrics.latency.labels(path, method).observe(time.perf_counter() - t0)
+
+
 def _err(status: int, code: str, message: str, request: Request, headers: dict[str, str] | None = None) -> JSONResponse:
     return JSONResponse(
         {"error": {"code": code, "message": message, "request_id": getattr(request.state, "request_id", None)}},
@@ -148,7 +189,6 @@ def create_app(gw: Gateway, manage_lifecycle: bool = True) -> FastAPI:
 
     app = FastAPI(title="Partner Gateway", version="1.0", lifespan=lifespan)
     app.state.gw = gw
-    tracer = tracing.tracer("partner-gateway")
 
     @app.exception_handler(ApiError)
     async def _api_error(request: Request, exc: ApiError) -> JSONResponse:
@@ -164,28 +204,7 @@ def create_app(gw: Gateway, manage_lifecycle: bool = True) -> FastAPI:
         )
         return _err(500, "internal_error", "internal error", request)
 
-    @app.middleware("http")
-    async def observe(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        request.state.request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
-        t0 = time.perf_counter()
-        with tracer.start_as_current_span(request.method, context=tracing.extract(dict(request.headers))) as span:
-            try:
-                response = await call_next(request)
-            except Exception:
-                # counted as a 5xx before the error handler answers, so the availability SLI sees it
-                path = getattr(request.scope.get("route"), "path", "unmatched")
-                gw.metrics.requests.labels(path, request.method, "500").inc()
-                gw.metrics.latency.labels(path, request.method).observe(time.perf_counter() - t0)
-                raise
-            # name spans and label metrics by route template (/v1/vehicles/{vin}), never the raw path,
-            # so VINs don't explode cardinality
-            path = getattr(request.scope.get("route"), "path", "unmatched")
-            span.update_name(f"{request.method} {path}")
-            span.set_attribute("http.status_code", response.status_code)
-        gw.metrics.requests.labels(path, request.method, str(response.status_code)).inc()
-        gw.metrics.latency.labels(path, request.method).observe(time.perf_counter() - t0)
-        response.headers["X-Request-Id"] = request.state.request_id
-        return response
+    app.add_middleware(ObserveMiddleware, gw=gw)
 
     # -- auth helpers ---------------------------------------------------------------
     async def authenticate(request: Request, scope: str | None = None) -> Partner:
