@@ -39,8 +39,9 @@ DEAD_LETTER_SUFFIX = ".dead-letter"
 
 class RedisStreamsBus:
     def __init__(self, redis: Redis, *, prefix: str = "pgw:", max_deliveries: int = 5, retry_after_s: float = 5.0,
-                 block_ms: int = 1000, batch: int = 50, maxlen: int = 100_000) -> None:
+                 block_ms: int = 1000, batch: int = 50, maxlen: int = 100_000, owns_redis: bool = False) -> None:
         self.redis = redis
+        self.owns_redis = owns_redis  # close the connection pool on close()
         self.prefix = prefix
         self.max_deliveries = max_deliveries
         self.retry_after_ms = int(retry_after_s * 1000)
@@ -122,6 +123,8 @@ class RedisStreamsBus:
             with contextlib.suppress(asyncio.CancelledError):
                 await t
         self._tasks.clear()
+        if self.owns_redis:
+            await self.redis.aclose()
 
 
 def _text(v: bytes | str) -> str:
